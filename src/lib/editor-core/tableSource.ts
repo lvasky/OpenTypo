@@ -218,14 +218,22 @@ export function preserveTableSource(
       (raw.match(/\s*$/)?.[0] ?? '') +
       separator.slice(to);
   }
-  result[1] = separator;
+  const newRowBounds = originalRows ? cellBounds(separator) : [];
+  if (originalRows && newRowBounds.length !== table.child(0).childCount) return null;
   for (let row = 0; row < table.childCount; row++) {
-    const next = table.child(row),
-      prev = original.child(row);
-    if (next.eq(prev)) continue;
+    const next = table.child(row);
+    const originalIndex = originalRows ? originalRows.get(row) : row;
+    if (originalIndex === undefined) {
+      result.push(renderNewRow(next, separator, newRowBounds, renderCell));
+      continue;
+    }
+    const prev = original.child(originalIndex);
+    const line = lines[originalIndex === 0 ? 0 : originalIndex + 1];
+    if (next.eq(prev)) {
+      result.push(line);
+      continue;
+    }
     if (next.childCount !== prev.childCount) return null;
-    const lineIndex = row === 0 ? 0 : row + 1;
-    const line = lines[lineIndex];
     const bounds = cellBounds(line);
     if (bounds.length !== next.childCount) return null;
     let patched = line;
