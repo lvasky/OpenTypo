@@ -3,25 +3,9 @@ import { Selection, type Command } from 'prosemirror-state';
 import { closeHistory } from 'prosemirror-history';
 import { serializeMarkdown } from './markdown';
 import { findTableContext } from './tableCommands';
-import { tableSourceCells, tableSourceFormatKey } from './tableSource';
+import { sourceWidth, tableSourceCells, tableSourceFormatKey } from './tableSource';
 import { projectInlineSource } from './InlineSourceCodec';
 import type { EditorClipboardPayload } from './types';
-
-const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-/** Source columns in a monospace editor: CJK/fullwidth and emoji occupy two cells. */
-function sourceWidth(text: string): number {
-  let width = 0;
-  for (const { segment } of graphemes.segment(text)) {
-    if (/^[\p{Mark}\u200d\ufe0e\ufe0f]+$/u.test(segment)) continue;
-    width +=
-      /[\u1100-\u115f\u2329\u232a\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff01-\uff60\uffe0-\uffe6]|\p{Script=Han}|\p{Extended_Pictographic}/u.test(
-        segment,
-      )
-        ? 2
-        : 1;
-  }
-  return width;
-}
 
 /** Change only padding and separator dashes; never reserialize inline cell content. */
 export function beautifyTableSource(source: string): string | null {

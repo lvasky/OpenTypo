@@ -2,10 +2,18 @@ import type { Node } from 'prosemirror-model';
 import { Plugin, PluginKey, type Transaction } from 'prosemirror-state';
 import { closeHistory } from 'prosemirror-history';
 import type { MarkdownSyncAnchor } from './scrollSyncMapping';
+import { isMarkdownTable } from './tableMarkdownSafety';
+
+type TableSource = {
+  original: Node;
+  lines: string[];
+  newline: string;
+  originalRows?: Map<number, number>;
+};
 
 // Only live tables/undo states retain their original source and immutable rows.
 // No DOM, document copies, global string cache or persistent listeners.
-const sources = new WeakMap<Node, { original: Node; lines: string[]; newline: string }>();
+const sources = new WeakMap<Node, TableSource>();
 export const tableSourceFormatKey = new PluginKey('tableSourceFormat');
 
 export function rememberTableSources(
@@ -64,8 +72,26 @@ function inheritSources(tr: Transaction): void {
         for (const candidate of candidates) {
           const source = sources.get(candidate.node);
           const next = after.nodeAt(map.map(candidate.pos, -1));
-          if (source && next?.type.name === 'table' && !sources.has(next))
-            sources.set(next, source);
+          if (source && next?.type.name === 'table' && !sources.has(next)) {
+            if (!source.originalRows && candidate.node.childCount === next.childCount) {
+              sources.set(next, source);
+              continue;
+            }
+            const nextStart = map.map(candidate.pos, -1) + 1;
+            const movedRows = new Map<number, number>();
+            candidate.node.forEach((_row, offset, index) => {
+              const originalIndex = source.originalRows ? source.originalRows.get(index) : index;
+              if (originalIndex === undefined) return;
+              const mapped = map.mapResult(candidate.pos + 1 + offset, 1);
+              if (!mapped.deleted) movedRows.set(mapped.pos - nextStart, originalIndex);
+            });
+            const originalRows = new Map<number, number>();
+            next.forEach((_row, offset, index) => {
+              const originalIndex = movedRows.get(offset);
+              if (originalIndex !== undefined) originalRows.set(index, originalIndex);
+            });
+            sources.set(next, { ...source, originalRows });
+          }
         }
       }
     });
@@ -100,6 +126,56 @@ export function tableSourcePlugin(): Plugin {
   });
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+/** Source columns in a monospace editor: CJK/fullwidth and emoji occupy two cells. */
+export function sourceWidth(text: string): number {
+  let width = 0;
+  for (const { segment } of graphemes.segment(text)) {
+    if (/^[\p{Mark}\u200d\ufe0e\ufe0f]+$/u.test(segment)) continue;
+    width +=
+      /[\u1100-\u115f\u2329\u232a\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff01-\uff60\uffe0-\uffe6]|\p{Script=Han}|\p{Extended_Pictographic}/u.test(
+        segment,
+      )
+        ? 2
+        : 1;
+  }
+  return width;
+}
+
+function renderNewRow(
+  row: Node,
+  separator: string,
+  bounds: Array<[number, number]>,
+  renderCell: (cell: Node) => string,
+): string {
+  let line = separator;
+  for (let column = bounds.length - 1; column >= 0; column--) {
+    const [from, to] = bounds[column];
+    const raw = separator.slice(from, to);
+    const cell = row.child(column);
+    const content = renderCell(cell);
+    const padding = Math.max(0, raw.trim().length - sourceWidth(content));
+    const before =
+      cell.attrs.align === 'right'
+        ? padding
+        : cell.attrs.align === 'center'
+          ? Math.floor(padding / 2)
+          : 0;
+    line =
+      line.slice(0, from) +
+      (raw.match(/^\s*/)?.[0] ?? '') +
+      ' '.repeat(before) +
+      content +
+      ' '.repeat(padding - before) +
+      (raw.match(/\s*$/)?.[0] ?? '') +
+      line.slice(to);
+  }
+  // Outer pipes keep empty edge cells and leading alignment spaces unambiguous.
+  if (bounds[0][0] === 0) line = '|' + line;
+  if (bounds[bounds.length - 1][1] === separator.length) line += '|';
+  return line;
+}
+
 /** Keep untouched rows verbatim, and replace only edited cell payloads. */
 export function preserveTableSource(
   table: Node,
@@ -109,8 +185,14 @@ export function preserveTableSource(
   if (!source) return null;
   const { original, lines, newline } = source;
   if (table.eq(original)) return lines.join(newline);
-  if (table.childCount !== original.childCount) return null;
-  const result = [...lines];
+  const { originalRows } = source;
+  if (originalRows) {
+    if (table.firstChild?.childCount !== original.firstChild?.childCount || !isMarkdownTable(table))
+      return null;
+  } else if (table.childCount !== original.childCount) {
+    return null;
+  }
+  const result: string[] = [];
   const separators = cellBounds(lines[1]);
   let separator = lines[1];
   for (let column = table.child(0).childCount - 1; column >= 0; column--) {
@@ -152,7 +234,7 @@ export function preserveTableSource(
         old = prev.child(column);
       // Attribute/structure changes need fresh GFM separators or a new grid.
       if (
-        cell.type !== old.type ||
+        (!originalRows && cell.type !== old.type) ||
         cell.attrs.colspan !== old.attrs.colspan ||
         cell.attrs.rowspan !== old.attrs.rowspan ||
         cell.attrs.colwidth !== old.attrs.colwidth ||
@@ -169,8 +251,9 @@ export function preserveTableSource(
         (raw.trim() ? (raw.match(/\s*$/)?.[0] ?? '') : '') +
         patched.slice(to);
     }
-    result[lineIndex] = patched;
+    result.push(patched);
   }
+  result.splice(1, 0, separator);
   return result.join(newline);
 }
 
