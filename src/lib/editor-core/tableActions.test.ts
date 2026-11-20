@@ -77,6 +77,24 @@ describe('table toolbar actions', () => {
     editor.execute({ type: 'undo' });
     expect(editor.getMarkdown()).toBe(raw);
   });
+  it('preserves existing cell padding when inserting and deleting a column', async () => {
+    const source = '| A    |B |\n| :----|---: |\n| a    |b |';
+    const { editor } = await open(source);
+    expect(editor.execute({ type: 'addTableColumnAfter' })).toBe(true);
+    expect(editor.getMarkdown()).toBe('| A    |      |B |\n| :----| :--- |---: |\n| a    |      |b |');
+
+    const reopened = await open(source);
+    expect(reopened.editor.execute({ type: 'deleteTableColumn' })).toBe(true);
+    expect(reopened.editor.getMarkdown()).toBe('|B |\n|---: |\n|b |');
+  });
+
+  it('keeps the entire existing table source when the size menu appends a row', async () => {
+    const source = '| A    |B |\r\n| :----|---: |\r\n| a    |b |';
+    const { editor } = await open(source);
+    expect(editor.execute({ type: 'resizeTable', rows: 3, columns: 2 })).toBe(true);
+    expect(editor.getMarkdown()).toBe(source + '\r\n|      |     |');
+  });
+
   it('copies the whole current table as Markdown and HTML without changing selection/source', async () => {
     const { editor, view, host, onCopyTable } = await open('Outside\n\n' + raw);
     const selection = view.state.selection.toJSON();

@@ -1645,7 +1645,7 @@ export class ProseMirrorEditorCore implements EditorCore {
   private createState(markdown: string): EditorState {
     this.detailsSession.prepare(markdown);
     const { doc, appended } = this.parseSemanticDocument(markdown);
-    if (this.sourceFormatDoc === null && markdown === this.sourceFormatMarkdown) this.sourceFormatDoc = doc;
+    if (markdown === this.sourceFormatMarkdown) this.sourceFormatDoc = doc;
     return EditorState.create({
       doc,
       selection: appended ? TextSelection.create(doc, doc.content.size - 1) : undefined,
@@ -2010,6 +2010,13 @@ export class ProseMirrorEditorCore implements EditorCore {
     this.commitPendingEdits();
     this.originalMarkdown = updateTocBlocks(markdown);
     this.originalDoc = this.parseSemanticDocument(this.originalMarkdown).doc;
+    const current = (this.view?.state ?? this.suspendedState)?.doc;
+    // Rebase onto the saved source without replacing the live state or undo history.
+    if (this.markdown === this.originalMarkdown && !this.semanticViewDirty &&
+        current?.eq(this.originalDoc)) {
+      this.sourceFormatMarkdown = this.originalMarkdown;
+      this.sourceFormatDoc = current;
+    }
     this.dirty = this.markdown !== this.originalMarkdown;
     this.emit('saved-baseline');
   }
@@ -2059,10 +2066,13 @@ export class ProseMirrorEditorCore implements EditorCore {
       : pendingDoc.content.eq(baseline.content)
         ? `${String(pendingDoc.attrs.frontMatterPrefix ?? '')}${splitFrontMatter(source).body}`
         : preservedSource ?? serializeMarkdown(removeEmptyTrailingParagraph(pendingDoc), { strictMarkdown: this.runtime.strictMarkdown });
-    // Keep the file's existing newline convention, including its final newline.
-    const newline = source.includes('\r\n') ? '\r\n' : '\n';
-    if (preservedSource === null) serializedMarkdown = serializedMarkdown.replace(/\r?\n/g, newline);
-    if (serializedMarkdown && source.endsWith('\n') && !serializedMarkdown.endsWith('\n')) serializedMarkdown += newline;
+    // Preserve the original line endings at EOF even on whole-document fallback.
+    if (preservedSource === null && !pendingDoc.content.eq(baseline.content)) {
+      const newline = source.includes('\r\n') ? '\r\n' : '\n';
+      const ending = source.match(/(?:\r?\n[ \t]*)+$/)?.[0] ?? '';
+      serializedMarkdown = serializedMarkdown.replace(/\r?\n/g, newline)
+        .replace(/(?:\r?\n[ \t]*)+$/, '') + ending;
+    }
     // 保留 Markdown 字符串层的 TOC 规范化，但不再因此重建 EditorState。
     // 语义视图中的 toc_block 已由 tocSyncPlugin 原位同步，历史栈保持不变。
     this.markdown = updateTocBlocks(serializedMarkdown);

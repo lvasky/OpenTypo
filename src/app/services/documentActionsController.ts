@@ -18,7 +18,6 @@ import {
   rememberNativeDocument,
   saveNativeMarkdownFile,
 } from './documentFiles';
-import { normalizeMarkdownForSave } from '../../lib/markdown/normalize';
 import { logInfo } from '../../lib/services/logger';
 import {
   DEFAULT_MARKDOWN_ENCODING,
@@ -154,7 +153,7 @@ export function createDocumentActionsController(options: DocumentActionsOptions)
       // 独立运行时由文档 ID 路由正文；旧单编辑器调用保留其 onChange 写入标签的方式。
       if (options.getEditorForTab || options.flushTabRuntime) {
         tab.markdown = currentMarkdown;
-        tab.dirty = normalizeMarkdownForSave(tab.markdown) !== normalizeMarkdownForSave(tab.savedMarkdown);
+        tab.dirty = tab.markdown !== tab.savedMarkdown;
       }
     }
     return core;
@@ -185,9 +184,8 @@ export function createDocumentActionsController(options: DocumentActionsOptions)
     const core = flushDocumentRuntime(tabId);
     const tab = options.getTabs().find((candidate) => candidate.id === tabId);
     if (!isMarkdownTab(tab)) return;
-    const changedWhileSaving = normalizeMarkdownForSave(tab.markdown) !== markdownToSave;
+    const changedWhileSaving = tab.markdown !== markdownToSave;
     core?.setSavedMarkdownBaseline?.(markdownToSave);
-    // 保存补齐的尾换行只属于磁盘基线，不回写正文触发 setMarkdown 或重建编辑历史。
     tab.savedMarkdown = markdownToSave;
     tab.dirty = changedWhileSaving;
     if (!changedWhileSaving) tab.draftId = null;
@@ -291,7 +289,7 @@ export function createDocumentActionsController(options: DocumentActionsOptions)
     const core = await prepareDocumentSave(targetTabId);
     const currentMarkdown = core?.getMarkdown() ?? activeTab.markdown;
     activeTab.markdown = currentMarkdown;
-    const markdownToSave = normalizeMarkdownForSave(currentMarkdown);
+    const markdownToSave = currentMarkdown;
 
     if (options.getDesktopEnabled()) {
       const saveAsTarget = saveAs || activeTab.diskReadonly;
@@ -665,7 +663,7 @@ export function createDocumentActionsController(options: DocumentActionsOptions)
     const core = await prepareDocumentSave(tabId);
     const currentMarkdown = core?.getMarkdown() ?? activeTab.markdown;
     activeTab.markdown = currentMarkdown;
-    const markdownToSave = normalizeMarkdownForSave(currentMarkdown);
+    const markdownToSave = currentMarkdown;
     if (options.getActiveTabId() === tabId) options.writeRecoveryDraft('before-overwrite-external');
     const { document, error } = await saveMarkdownWithSourceEncoding(
       path,
@@ -754,7 +752,7 @@ export function createDocumentActionsController(options: DocumentActionsOptions)
 
     const path = targetTab.nativePath;
     const fileName = targetTab.fileName;
-    const markdownToSave = normalizeMarkdownForSave(targetTab.markdown);
+    const markdownToSave = targetTab.markdown;
     const { document, error } = await saveMarkdownWithSourceEncoding(
       path,
       markdownToSave,
@@ -779,7 +777,7 @@ export function createDocumentActionsController(options: DocumentActionsOptions)
     const latestTab = tabs.find((tab) => tab.id === tabId);
     if (!isMarkdownTab(latestTab) || latestTab.nativePath !== path) return;
 
-    const latestMarkdownToSave = normalizeMarkdownForSave(latestTab.markdown);
+    const latestMarkdownToSave = latestTab.markdown;
     if (latestMarkdownToSave !== markdownToSave) {
       applyAutoSaveDiskBaseline(tabId, { markdown: markdownToSave, modifiedAt: document.modifiedAt });
       cancelPendingAutoSave(tabId);

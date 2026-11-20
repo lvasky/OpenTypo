@@ -897,7 +897,7 @@
 
 **Called by:** `src/app/App.svelte`
 
-**Depends on:** `src/app/services/documentFiles.ts`, `src/app/services/tabs.ts`, `src/lib/markdown/normalize.ts`, `src/lib/outline/outlineService.ts`, `src/app/services/recoveryDraft.ts`
+**Depends on:** `src/app/services/documentFiles.ts`, `src/app/services/tabs.ts`, `src/lib/outline/outlineService.ts`, `src/app/services/recoveryDraft.ts`
 
 **Change this when：**
 - 修改打开/保存/自动保存流程
@@ -1833,30 +1833,6 @@
 - 修改 front matter 展示 UI
 
 **Related tests:** `src/lib/markdown/frontMatter.test.ts`
-
-**Confidence:** high
-
----
-
-### `src/lib/markdown/normalize.ts`
-
-**Kind:** utility
-
-**Owns：**
-- 保存前规范化 Markdown 文本
-- 末尾换行等格式统一
-
-**Does not own：**
-- 不拥有保存流程（在 documentActionsController.ts 中）
-
-**Called by:** `src/app/services/documentActionsController.ts`
-
-**Depends on:** —
-
-**Change this when：**
-- 修改保存规范化规则
-
-**Related tests:** `src/lib/markdown/normalize.test.ts`
 
 **Confidence:** high
 

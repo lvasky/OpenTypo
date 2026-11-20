@@ -1,6 +1,7 @@
 import type { Node } from 'prosemirror-model';
 import { Plugin, PluginKey, type Transaction } from 'prosemirror-state';
 import { closeHistory } from 'prosemirror-history';
+import { AddMarkStep, RemoveMarkStep, type StepMap } from 'prosemirror-transform';
 import type { MarkdownSyncAnchor } from './scrollSyncMapping';
 import { isMarkdownTable } from './tableMarkdownSafety';
 
@@ -8,7 +9,8 @@ type TableSource = {
   original: Node;
   lines: string[];
   newline: string;
-  originalRows?: Map<number, number>;
+  originalRows?: Array<number | undefined>;
+  originalColumns?: Array<number | undefined>;
 };
 
 // Only live tables/undo states retain their original source and immutable rows.
@@ -55,46 +57,105 @@ export function rememberTableSources(
   }
 }
 
+function sourceIndex(indices: Array<number | undefined> | undefined, index: number) {
+  return indices ? indices[index] : index;
+}
+
+/** Whole-table commands supply the row/column order of their replacement. */
+export function remapTableSource(
+  before: Node,
+  after: Node,
+  rowFrom: (index: number) => number,
+  columnFrom: (index: number) => number,
+): void {
+  const source = sources.get(before);
+  if (!source) return;
+  sources.set(after, {
+    ...source,
+    originalRows: Array.from({ length: after.childCount }, (_, index) => {
+      const previous = rowFrom(index);
+      return previous < before.childCount ? sourceIndex(source.originalRows, previous) : undefined;
+    }),
+    originalColumns: Array.from({ length: after.firstChild!.childCount }, (_, index) => {
+      const previous = columnFrom(index);
+      return previous < before.firstChild!.childCount
+        ? sourceIndex(source.originalColumns, previous)
+        : undefined;
+    }),
+  });
+}
+
+function mapChildren(
+  before: Node,
+  after: Node,
+  oldStart: number,
+  newStart: number,
+  map: StepMap,
+  indices: Array<number | undefined> | undefined,
+  original: Node,
+): Array<number | undefined> {
+  const mapped = new Map<number, number>();
+  before.forEach((_child, offset, index) => {
+    const original = sourceIndex(indices, index);
+    const pos = map.mapResult(oldStart + offset, 1);
+    if (original !== undefined && !pos.deleted) mapped.set(pos.pos, original);
+  });
+  const result: Array<number | undefined> = [];
+  after.forEach((_child, offset) => result.push(mapped.get(newStart + offset)));
+  // History may reinsert an original row/cell that has no position in the previous step.
+  if (result.includes(undefined)) {
+    const available = new Map<Node, number>();
+    const used = new Set(result);
+    original.forEach((child, _offset, index) => {
+      if (!used.has(index)) available.set(child, index);
+    });
+    after.forEach((child, _offset, index) => {
+      if (result[index] !== undefined) return;
+      result[index] = available.get(child);
+      available.delete(child);
+    });
+  }
+  return result;
+}
+
 function inheritSources(tr: Transaction): void {
   tr.steps.forEach((step, index) => {
     const before = tr.docs[index];
     const after = tr.docs[index + 1] ?? tr.doc;
     const map = step.getMap();
-    map.forEach((from, to) => {
-      for (const pos of [from, to]) {
-        const $pos = before.resolve(pos);
-        const candidates: Array<{ node: Node; pos: number }> = [];
-        for (let depth = $pos.depth; depth > 0; depth--) {
-          if ($pos.node(depth).type.name === 'table')
-            candidates.push({ node: $pos.node(depth), pos: $pos.before(depth) });
-        }
-        if ($pos.nodeAfter?.type.name === 'table') candidates.push({ node: $pos.nodeAfter, pos });
-        for (const candidate of candidates) {
-          const source = sources.get(candidate.node);
-          const next = after.nodeAt(map.map(candidate.pos, -1));
-          if (source && next?.type.name === 'table' && !sources.has(next)) {
-            if (!source.originalRows && candidate.node.childCount === next.childCount) {
-              sources.set(next, source);
-              continue;
-            }
-            const nextStart = map.map(candidate.pos, -1) + 1;
-            const movedRows = new Map<number, number>();
-            candidate.node.forEach((_row, offset, index) => {
-              const originalIndex = source.originalRows ? source.originalRows.get(index) : index;
-              if (originalIndex === undefined) return;
-              const mapped = map.mapResult(candidate.pos + 1 + offset, 1);
-              if (!mapped.deleted) movedRows.set(mapped.pos - nextStart, originalIndex);
-            });
-            const originalRows = new Map<number, number>();
-            next.forEach((_row, offset, index) => {
-              const originalIndex = movedRows.get(offset);
-              if (originalIndex !== undefined) originalRows.set(index, originalIndex);
-            });
-            sources.set(next, { ...source, originalRows });
-          }
-        }
+    const inheritAt = (pos: number) => {
+      const $pos = before.resolve(pos);
+      for (let depth = $pos.depth; depth > 0; depth--) {
+        const table = $pos.node(depth);
+        const source = sources.get(table);
+        if (!source || table.type.name !== 'table') continue;
+        const oldPos = $pos.before(depth);
+        const newPos = map.map(oldPos, -1);
+        const next = after.nodeAt(newPos);
+        if (next?.type !== table.type || sources.has(next)) continue;
+        // Do not mistake a different table at the boundary of a deletion for this one.
+        if (map.mapResult(oldPos, 1).deleted) continue;
+        const originalRows = table.childCount === next.childCount
+          ? source.originalRows
+          : mapChildren(table, next, oldPos + 1, newPos + 1, map, source.originalRows, source.original);
+        const oldHeader = table.firstChild;
+        const newHeader = next.firstChild;
+        const originalColumns = oldHeader && newHeader && oldHeader.childCount !== newHeader.childCount
+          ? mapChildren(oldHeader, newHeader, oldPos + 2, newPos + 2, map, source.originalColumns, source.original.firstChild!)
+          : source.originalColumns;
+        sources.set(next, originalRows === source.originalRows && originalColumns === source.originalColumns
+          ? source
+          : { ...source, originalRows, originalColumns });
       }
+    };
+    map.forEach((from, to) => {
+      inheritAt(from);
+      if (to !== from) inheritAt(to);
     });
+    if (step instanceof AddMarkStep || step instanceof RemoveMarkStep) {
+      inheritAt(step.from);
+      if (step.to !== step.from) inheritAt(step.to);
+    }
   });
 }
 
@@ -142,131 +203,114 @@ export function sourceWidth(text: string): number {
   return width;
 }
 
-function renderNewRow(
-  row: Node,
-  separator: string,
-  bounds: Array<[number, number]>,
-  renderCell: (cell: Node) => string,
-): string {
-  let line = separator;
-  for (let column = bounds.length - 1; column >= 0; column--) {
-    const [from, to] = bounds[column];
-    const raw = separator.slice(from, to);
-    const cell = row.child(column);
-    const content = renderCell(cell);
-    const padding = Math.max(0, raw.trim().length - sourceWidth(content));
-    const before =
-      cell.attrs.align === 'right'
-        ? padding
-        : cell.attrs.align === 'center'
-          ? Math.floor(padding / 2)
-          : 0;
-    line =
-      line.slice(0, from) +
-      (raw.match(/^\s*/)?.[0] ?? '') +
-      ' '.repeat(before) +
-      content +
-      ' '.repeat(padding - before) +
-      (raw.match(/\s*$/)?.[0] ?? '') +
-      line.slice(to);
-  }
-  // Outer pipes keep empty edge cells and leading alignment spaces unambiguous.
-  if (bounds[0][0] === 0) line = '|' + line;
-  if (bounds[bounds.length - 1][1] === separator.length) line += '|';
-  return line;
+function paddedCell(cell: Node, template: string, renderCell: (cell: Node) => string): string {
+  const content = renderCell(cell);
+  const padding = Math.max(0, template.trim().length - sourceWidth(content));
+  const before =
+    cell.attrs.align === 'right'
+      ? padding
+      : cell.attrs.align === 'center'
+        ? Math.floor(padding / 2)
+        : 0;
+  return edgeSpace(template, true) + ' '.repeat(before) + content
+    + ' '.repeat(padding - before) + edgeSpace(template, false);
 }
 
-/** Keep untouched rows verbatim, and replace only edited cell payloads. */
+function edgeSpace(text: string, leading: boolean): string {
+  return text.match(leading ? /^\s*/ : /\s*$/)?.[0] ?? '';
+}
+
+function joinCells(
+  line: string,
+  bounds: Array<[number, number]>,
+  cells: string[],
+  header = false,
+): string {
+  const start = bounds[0][0];
+  const end = bounds[bounds.length - 1][1];
+  // Explicit edges disambiguate empty cells introduced by structural edits.
+  const needsLeft = !cells[0].trim() || /^(?: {4}| *\t)/.test(cells[0]) ||
+    (header && cells.length === 1 && end === line.length);
+  const left = start ? line.slice(0, start) : needsLeft ? '|' : '';
+  const right = end < line.length ? line.slice(end) : cells.at(-1)?.trim() ? '' : '|';
+  return left + cells.join('|') + right;
+}
+
+/** Keep the raw content and padding of cells surviving an edit. */
 export function preserveTableSource(
   table: Node,
   renderCell: (cell: Node) => string,
 ): string | null {
   const source = sources.get(table);
   if (!source) return null;
-  const { original, lines, newline } = source;
+  const { original, lines, newline, originalRows, originalColumns } = source;
   if (table.eq(original)) return lines.join(newline);
-  const { originalRows } = source;
-  if (originalRows) {
-    if (table.firstChild?.childCount !== original.firstChild?.childCount || !isMarkdownTable(table))
-      return null;
-  } else if (table.childCount !== original.childCount) {
-    return null;
-  }
+  if (!isMarkdownTable(table)) return null;
+
+  const header = table.firstChild!;
+  const oldHeader = original.firstChild!;
+  if ((!originalRows && table.childCount !== original.childCount) ||
+      (!originalColumns && header.childCount !== oldHeader.childCount)) return null;
+  const oldSeparator = lines[1];
+  const separators = tableSourceCellsWithPadding(oldSeparator);
+  if (separators.length !== oldHeader.childCount) return null;
+
+  const columns = Array.from({ length: header.childCount }, (_, index) =>
+    sourceIndex(originalColumns, index));
+  const separatorCells = columns.map((oldIndex, index) => {
+    const align = header.child(index).attrs.align;
+    const raw = oldIndex === undefined ? ' --- ' : separators[oldIndex];
+    if (oldIndex !== undefined && align === oldHeader.child(oldIndex).attrs.align) return raw;
+    const dashes = raw.match(/-+/)?.[0] ?? '---';
+    const left = align === 'left' || align === 'center' ? ':' : '';
+    const right = align === 'right' || align === 'center' ? ':' : '';
+    return edgeSpace(raw, true) + left + dashes + right + edgeSpace(raw, false);
+  });
+  const separator = joinCells(oldSeparator, cellBounds(oldSeparator), separatorCells);
+  const columnsUnchanged = columns.length === oldHeader.childCount &&
+    columns.every((previous, index) => previous === index);
+
   const result: string[] = [];
-  const separators = cellBounds(lines[1]);
-  let separator = lines[1];
-  for (let column = table.child(0).childCount - 1; column >= 0; column--) {
-    const align = table.child(0).child(column).attrs.align;
-    if (align === original.child(0).maybeChild(column)?.attrs.align) continue;
-    if (!separators[column]) return null;
-    const [from, to] = separators[column];
-    const raw = lines[1].slice(from, to);
-    const dashes = raw.match(/-+/)?.[0];
-    if (!dashes) return null;
-    const marker =
-      align === 'center'
-        ? `:${dashes}:`
-        : align === 'right'
-          ? `${dashes}:`
-          : align === 'left'
-            ? `:${dashes}`
-            : dashes;
-    separator =
-      separator.slice(0, from) +
-      (raw.match(/^\s*/)?.[0] ?? '') +
-      marker +
-      (raw.match(/\s*$/)?.[0] ?? '') +
-      separator.slice(to);
-  }
-  const newRowBounds = originalRows ? cellBounds(separator) : [];
-  if (originalRows && newRowBounds.length !== table.child(0).childCount) return null;
   for (let row = 0; row < table.childCount; row++) {
     const next = table.child(row);
-    const originalIndex = originalRows ? originalRows.get(row) : row;
-    if (originalIndex === undefined) {
-      result.push(renderNewRow(next, separator, newRowBounds, renderCell));
+    const oldIndex = sourceIndex(originalRows, row);
+    if (oldIndex === undefined) {
+      const cells = separatorCells.map((template, col) => paddedCell(next.child(col), template, renderCell));
+      const bounds = cellBounds(separator);
+      result.push(joinCells(separator, bounds, cells, row === 0));
       continue;
     }
-    const prev = original.child(originalIndex);
-    const line = lines[originalIndex === 0 ? 0 : originalIndex + 1];
-    if (next.eq(prev)) {
+    const prev = original.child(oldIndex);
+    const line = lines[oldIndex === 0 ? 0 : oldIndex + 1];
+    if (next.eq(prev) && columnsUnchanged) {
       result.push(line);
       continue;
     }
-    if (next.childCount !== prev.childCount) return null;
     const bounds = cellBounds(line);
-    if (bounds.length !== next.childCount) return null;
-    let patched = line;
-    for (let column = next.childCount - 1; column >= 0; column--) {
-      const cell = next.child(column),
-        old = prev.child(column);
-      // Attribute/structure changes need fresh GFM separators or a new grid.
-      if (
-        (!originalRows && cell.type !== old.type) ||
-        cell.attrs.colspan !== old.attrs.colspan ||
-        cell.attrs.rowspan !== old.attrs.rowspan ||
-        cell.attrs.colwidth !== old.attrs.colwidth ||
-        cell.attrs.align !== table.child(0).child(column).attrs.align
-      )
-        return null;
-      if (cell.content.eq(old.content)) continue;
-      const [from, to] = bounds[column];
-      const raw = line.slice(from, to);
-      patched =
-        patched.slice(0, from) +
-        (raw.match(/^\s*/)?.[0] ?? '') +
-        renderCell(cell) +
-        (raw.trim() ? (raw.match(/\s*$/)?.[0] ?? '') : '') +
-        patched.slice(to);
-    }
-    result.push(patched);
+    const rawCells = bounds.map(([from, to]) => line.slice(from, to));
+
+    const cells = columns.map((previous, col) => {
+      const cell = next.child(col);
+      const raw = previous === undefined ? undefined : rawCells[previous];
+      if (raw === undefined) return paddedCell(cell, separatorCells[col], renderCell);
+      if (cell.content.eq(prev.child(previous!).content)) return raw;
+      return edgeSpace(raw, true) + renderCell(cell) + (raw.trim() ? edgeSpace(raw, false) : '');
+    });
+    // A body row may omit trailing cells or contain additional cells ignored by GFM.
+    // Keep ignored source cells in place when editing the modeled columns.
+    const extraCells = row > 0 ? rawCells.slice(prev.childCount) : [];
+    result.push(joinCells(line, bounds, cells.concat(extraCells), row === 0));
   }
   result.splice(1, 0, separator);
   return result.join(newline);
 }
 
+function tableSourceCellsWithPadding(line: string): string[] {
+  return cellBounds(line).map(([from, to]) => line.slice(from, to));
+}
+
 export function tableSourceCells(line: string): string[] {
-  return cellBounds(line).map(([from, to]) => line.slice(from, to).trim());
+  return tableSourceCellsWithPadding(line).map((cell) => cell.trim());
 }
 
 function cellBounds(line: string): Array<[number, number]> {

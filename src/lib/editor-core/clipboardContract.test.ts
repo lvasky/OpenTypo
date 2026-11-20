@@ -151,6 +151,38 @@ describe('clipboard and minimal escaping contract', () => {
     expect(editor.getMarkdown()).toBe(source.replace('change me', 'changed'));
   });
 
+  it.each([false, true])('preserves source between distant edits (save between edits: %s)', (save) => {
+    const source = 'first\n\n+ unedited\n+ unedited too\n\n~~~~ ruby\nputs 1\n~~~~\n\nlast';
+    const { editor, view } = open(source);
+    const replace = (before: string, after: string) => {
+      let pos = -1;
+      view.state.doc.descendants((node, at) => {
+        if (node.isText && node.text === before) pos = at;
+      });
+      expect(pos).toBeGreaterThanOrEqual(0);
+      view.dispatch(view.state.tr.insertText(after, pos, pos + before.length));
+    };
+    replace('first', 'start');
+    if (save) editor.setSavedMarkdownBaseline(editor.getMarkdown());
+    replace('last', 'end');
+    expect(editor.getMarkdown()).toBe(source.replace('first', 'start').replace('last', 'end'));
+  });
+
+  it('preserves list markers and fenced code style during local edits', () => {
+    const source = '+   one\r\n+   two\r\n\r\n~~~~ ruby\r\nputs 1\nputs 2\r\n~~~~  \r\n';
+    const { editor, view } = open(source);
+    let item = -1;
+    let code = -1;
+    view.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === 'one') item = pos;
+      if (node.type.name === 'code_block') code = pos + 1 + 'puts '.length;
+    });
+    expect(item).toBeGreaterThanOrEqual(0);
+    expect(code).toBeGreaterThanOrEqual(0);
+    view.dispatch(view.state.tr.insertText('ONE', item, item + 3).insertText('3', code, code + 1));
+    expect(editor.getMarkdown()).toBe(source.replace('one', 'ONE').replace('puts 1', 'puts 3'));
+  });
+
   it.each([false, true])(
     'retains unsaved manual source formatting when semantic editing resumes (deferred: %s)',
     (deferred) => {

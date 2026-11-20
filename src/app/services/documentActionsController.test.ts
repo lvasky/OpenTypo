@@ -270,7 +270,7 @@ describe('documentActionsController', () => {
 
     expect(saveNativeMarkdownFile).toHaveBeenCalledWith(
       'C:/docs/old.md',
-      '# New Title\n\nchanged\n\n',
+      '# New Title\n\nchanged',
       'old.md',
       null,
     );
@@ -333,9 +333,9 @@ describe('documentActionsController', () => {
     const document: NativeDocument = {
       path: 'C:/docs/new.md',
       fileName: 'new.md',
-      markdown: '# New Title\n\nchanged\n\n',
+      markdown: '# New Title\n\nchanged',
       modifiedAt: 2,
-      sizeBytes: 23,
+      sizeBytes: 21,
       readonly: false,
     };
     vi.mocked(saveNativeMarkdownFile).mockResolvedValue({ document, error: '' });
@@ -346,7 +346,7 @@ describe('documentActionsController', () => {
     expect(saved).toBe(true);
     expect(saveNativeMarkdownFile).toHaveBeenCalledWith(
       null,
-      '# New Title\n\nchanged\n\n',
+      '# New Title\n\nchanged',
       'New Title.md',
       null,
     );
@@ -368,7 +368,7 @@ describe('documentActionsController', () => {
     expect(saved).toBe(false);
     expect(saveNativeMarkdownFile).toHaveBeenCalledWith(
       null,
-      '# New Title\n\nchanged\n\n',
+      '# New Title\n\nchanged',
       'New Title.md',
       null,
     );
@@ -496,9 +496,9 @@ describe('documentActionsController', () => {
       document: {
         path: tab.nativePath!,
         fileName: tab.fileName,
-        markdown: `${editedMarkdown}\n\n`,
+        markdown: editedMarkdown,
         modifiedAt: 2,
-        sizeBytes: editedMarkdown.length + 2,
+        sizeBytes: editedMarkdown.length,
         readonly: false,
       },
       error: '',
@@ -510,7 +510,7 @@ describe('documentActionsController', () => {
     expect(saveNativeMarkdownFile).toHaveBeenNthCalledWith(
       1,
       tab.nativePath,
-      `${editedMarkdown}\n\n`,
+      editedMarkdown,
       tab.fileName,
       null,
     );
@@ -556,7 +556,7 @@ describe('documentActionsController', () => {
     await vi.advanceTimersByTimeAsync(0);
     if (saving) await saving;
     expect(commitPendingEdits).toHaveBeenCalled();
-    expect(saveNativeMarkdownFile).toHaveBeenCalledWith(tab.nativePath, '**中文提交**\n\n', tab.fileName, null);
+    expect(saveNativeMarkdownFile).toHaveBeenCalledWith(tab.nativePath, '**中文提交**', tab.fileName, null);
   });
 
   it('segmented 标签关闭不由 Markdown controller 处理', async () => {

@@ -16,6 +16,7 @@ import {
 } from 'prosemirror-tables';
 import { schema, type TableColumnAlignment } from './schema';
 import { closeHistory } from 'prosemirror-history';
+import { remapTableSource } from './tableSource';
 
 interface TableContext {
   table: ProseMirrorNode;
@@ -214,6 +215,12 @@ function moveCurrentTableAxis(axis: 'row' | 'column', direction: -1 | 1): Comman
         ? sourceRow : sourceRow.type.create(sourceRow.attrs, cells, sourceRow.marks));
     }
     const next = table.type.create(table.attrs, rows, table.marks);
+    remapTableSource(
+      table,
+      next,
+      (row) => axis === 'row' ? swap(row) : row,
+      (column) => axis === 'column' ? swap(column) : column,
+    );
     const tr = closeHistory(state.tr).replaceWith(tableStart - 1, tableStart - 1 + table.nodeSize, next);
     const nextRow = axis === 'row' ? target : rowIndex;
     const nextColumn = axis === 'column' ? target : columnIndex;
@@ -252,6 +259,7 @@ export function resizeCurrentTable(rows: number, columns: number): Command {
     const resizedTable = resizeTableNode(context.table, targetRows, targetColumns);
     if (resizedTable.eq(context.table)) return false;
 
+    remapTableSource(context.table, resizedTable, (index) => index, (index) => index);
     const tablePosition = context.tableStart - 1;
     const tr = state.tr.replaceWith(
       tablePosition,
