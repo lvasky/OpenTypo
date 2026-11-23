@@ -9,7 +9,9 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow};
 
-const GITHUB_LATEST_RELEASE_API: &str = "https://api.github.com/repos/nomo-md/nomo/releases/latest";
+const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/lvasky/nomo/releases";
+const GITHUB_DOWNLOAD_PATH: &str = "/lvasky/nomo/releases/download/";
+const WINDOWS_RELEASE_TAG_PREFIX: &str = "windows-strict-markdown-v";
 const GITHUB_PROXY_PREFIX: &str = "https://gh-proxy.com/";
 const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const UPDATE_SMALL_REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
@@ -341,6 +343,8 @@ impl Drop for SoftwareUpdateCheckGuard {
 #[derive(Debug, Deserialize)]
 struct GitHubRelease {
     tag_name: String,
+    #[serde(default)]
+    draft: bool,
     published_at: Option<String>,
     created_at: Option<String>,
     body: Option<String>,
@@ -610,7 +614,7 @@ async fn perform_software_update_check(
     let (release, release_source) = fetch_latest_github_release(&client).await?;
 
     // 步骤3：比较版本号
-    let release_version = normalize_release_version(&release.tag_name)?;
+    let release_version = release_version_from_tag(&release.tag_name)?.to_string();
     let date = release.published_at.clone().or(release.created_at.clone());
     crate::app_logger::info(
         "Update",
@@ -779,6 +783,10 @@ async fn download_software_update_inner<R: Runtime>(
         return Err("当前环境不支持自动更新：仅 Windows 安装版支持应用内更新。".to_string());
     }
     validate_md5(&candidate.md5)?;
+    let expected_name = expected_asset_name(candidate.asset_kind, &candidate.version);
+    if candidate.asset_name != expected_name || !is_fork_download_url(&candidate.download_url) {
+        return Err("更新安装包不属于 lvasky/nomo 的发布。".to_string());
+    }
 
     let update_dir = software_update_cache_dir(&app)?;
     fs::create_dir_all(&update_dir).map_err(|error| format!("创建更新缓存目录失败：{error}"))?;
@@ -1186,13 +1194,16 @@ async fn fetch_latest_github_release_from_source(
 ) -> Result<GitHubRelease, SoftwareUpdateRequestFailure> {
     let response = send_small_update_request(
         client,
-        GITHUB_LATEST_RELEASE_API,
+        GITHUB_RELEASES_API,
         source,
         "请求 GitHub Release 失败",
     )
     .await?;
-    response.json::<GitHubRelease>().await.map_err(|error| {
+    let releases = response.json::<Vec<GitHubRelease>>().await.map_err(|error| {
         SoftwareUpdateRequestFailure::from_reqwest("解析 GitHub Release 更新信息失败", error)
+    })?;
+    newest_windows_release(releases).ok_or_else(|| {
+        SoftwareUpdateRequestFailure::terminal("lvasky/nomo 暂无带完整更新文件的 Windows 发布。")
     })
 }
 
@@ -1378,40 +1389,29 @@ fn update_request_url(
     original_url: &str,
     source: SoftwareUpdateSource,
 ) -> Result<String, SoftwareUpdateRequestFailure> {
-    match source {
-        SoftwareUpdateSource::GitHub => Ok(original_url.to_string()),
-        SoftwareUpdateSource::GhProxy => github_proxy_url(original_url).ok_or_else(|| {
-            SoftwareUpdateRequestFailure::terminal(
-                "该更新地址不属于允许通过 gh-proxy 访问的 Nomo GitHub 地址。",
-            )
-        }),
+    if original_url != GITHUB_RELEASES_API && !is_fork_download_url(original_url) {
+        return Err(SoftwareUpdateRequestFailure::terminal(
+            "更新地址不属于 lvasky/nomo 的发布。",
+        ));
     }
+    Ok(match source {
+        SoftwareUpdateSource::GitHub => original_url.to_string(),
+        SoftwareUpdateSource::GhProxy => format!("{GITHUB_PROXY_PREFIX}{original_url}"),
+    })
 }
 
-fn github_proxy_url(original_url: &str) -> Option<String> {
-    let url = reqwest::Url::parse(original_url).ok()?;
-    if url.scheme() != "https"
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.port().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return None;
-    }
-
-    // 仓库迁移后 Release 返回新地址，同时兼容旧地址和已有更新缓存。
-    let allowed = (url.host_str() == Some("api.github.com")
-        && matches!(
-            url.path(),
-            "/repos/nomo-md/nomo/releases/latest" | "/repos/LIXianSenQwQ/nomo/releases/latest"
-        ))
-        || (url.host_str() == Some("github.com")
-            && (url.path().starts_with("/nomo-md/nomo/releases/download/")
-                || url
-                    .path()
-                    .starts_with("/LIXianSenQwQ/nomo/releases/download/")));
-    allowed.then(|| format!("{GITHUB_PROXY_PREFIX}{original_url}"))
+fn is_fork_download_url(original_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(original_url) else {
+        return false;
+    };
+    url.scheme() == "https"
+        && url.host_str() == Some("github.com")
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && url.path().starts_with(GITHUB_DOWNLOAD_PATH)
 }
 
 fn is_retryable_update_status(status: reqwest::StatusCode) -> bool {
@@ -1430,12 +1430,32 @@ fn release_http_client() -> Result<reqwest::Client, String> {
         .map_err(|error| format!("创建更新请求客户端失败：{error}"))
 }
 
-fn normalize_release_version(tag_name: &str) -> Result<String, String> {
-    let version = tag_name.trim().trim_start_matches('v').trim();
-    if version.is_empty() {
-        return Err("GitHub Release 缺少有效版本号。".to_string());
-    }
-    Ok(version.to_string())
+fn release_version_from_tag(tag: &str) -> Result<semver::Version, String> {
+    let version = tag
+        .strip_prefix(WINDOWS_RELEASE_TAG_PREFIX)
+        .or_else(|| tag.strip_prefix('v'))
+        .ok_or_else(|| format!("GitHub Release 缺少有效版本号：{tag}"))?;
+    semver::Version::parse(version).map_err(|error| format!("解析 Release 版本号失败：{error}"))
+}
+
+fn newest_windows_release(releases: Vec<GitHubRelease>) -> Option<GitHubRelease> {
+    releases
+        .into_iter()
+        .filter(|release| !release.draft)
+        .filter_map(|release| {
+            let version = release_version_from_tag(&release.tag_name).ok()?;
+            let version_text = version.to_string();
+            let files = [
+                select_windows_installer_asset(&release.assets, &version_text),
+                select_windows_portable_asset(&release.assets, &version_text),
+                find_asset_by_name(&release.assets, CHECKSUMS_ASSET_NAME),
+            ];
+            files.iter().all(|file| {
+                file.is_some_and(|asset| is_fork_download_url(&asset.browser_download_url))
+            }).then_some((version, release))
+        })
+        .max_by(|(left, _), (right, _)| left.cmp(right))
+        .map(|(_, release)| release)
 }
 
 fn is_release_newer(current_version: &str, release_version: &str) -> Result<bool, String> {
@@ -1513,7 +1533,8 @@ fn software_update_cache_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, 
         .path()
         .app_cache_dir()
         .map_err(|error| format!("获取更新缓存目录失败：{error}"))?
-        .join("updates"))
+        .join("updates")
+        .join("lvasky-nomo"))
 }
 
 fn save_cached_update_info(
@@ -1671,7 +1692,8 @@ fn launch_windows_installer_and_exit<R: Runtime>(
 mod tests {
     use super::{
         find_md5_for_file, is_release_newer, perform_software_update_check,
-        select_windows_installer_asset, GitHubReleaseAsset, SoftwareUpdateInstallationKind,
+        is_fork_download_url, newest_windows_release, select_windows_installer_asset, GitHubRelease,
+        GitHubReleaseAsset, SoftwareUpdateInstallationKind,
     };
 
     fn asset(name: &str) -> GitHubReleaseAsset {
@@ -1731,6 +1753,50 @@ eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee  Nomo_0.1.4_x64.zip";
             select_windows_installer_asset(&assets, "0.1.4").map(|asset| asset.name.as_str()),
             Some("Nomo_0.1.4_x64-setup.exe")
         );
+    }
+
+    fn release(tag: &str, version: &str, draft: bool, complete: bool) -> GitHubRelease {
+        let mut assets: Vec<_> = [
+            format!("Nomo_{version}_x64-setup.exe"),
+            format!("Nomo_{version}_x64.zip"),
+            "checksums.md5".into(),
+        ]
+        .iter()
+        .map(|name| GitHubReleaseAsset {
+            name: name.clone(),
+            browser_download_url: format!("https://github.com/lvasky/nomo/releases/download/{tag}/{name}"),
+            size: Some(100),
+        })
+        .collect();
+        if !complete {
+            assets.pop();
+        }
+        GitHubRelease {
+            tag_name: tag.into(),
+            draft,
+            published_at: None,
+            created_at: None,
+            body: None,
+            assets,
+        }
+    }
+
+    #[test]
+    fn selects_newest_complete_published_fork_release_by_version() {
+        let releases = vec![
+            release("windows-strict-markdown-20261123-r12", "0.6.9", false, true),
+            release("windows-strict-markdown-v0.6.6", "0.6.6", true, true),
+            release("windows-strict-markdown-v0.6.5", "0.6.5", false, false),
+            release("windows-strict-markdown-v0.6.3", "0.6.3", false, true),
+            release("v0.6.4", "0.6.4", false, true),
+        ];
+        assert_eq!(newest_windows_release(releases).unwrap().tag_name, "v0.6.4");
+    }
+
+    #[test]
+    fn limits_update_downloads_to_this_fork() {
+        assert!(is_fork_download_url("https://github.com/lvasky/nomo/releases/download/v0.6.3/Nomo_0.6.3_x64.zip"));
+        assert!(!is_fork_download_url("https://github.com/nomo-md/nomo/releases/download/v0.6.3/Nomo_0.6.3_x64.zip"));
     }
 
     #[test]

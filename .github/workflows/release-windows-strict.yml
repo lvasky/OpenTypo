@@ -3,7 +3,7 @@ name: Release Windows strict Markdown
 on:
   push:
     tags:
-      - 'windows-strict-markdown-*'
+      - 'windows-strict-markdown-v*.*.*'
 
 permissions:
   contents: write
@@ -66,6 +66,16 @@ jobs:
             --maxWorkers=4 --minWorkers=1 --reporter=default --reporter=json --outputFile=artifacts/tests.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Check release version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_NAME -ne "windows-strict-markdown-v$version") {
+            throw "Release tag does not match Nomo version $version"
+          }
+          "NOMO_RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+
       - name: Build native Windows installer
         run: pnpm build:win64:nsis
 
@@ -76,7 +86,8 @@ jobs:
           $release = 'src-tauri/target/x86_64-pc-windows-msvc/release'
           $installers = @(Get-ChildItem "$release/bundle/nsis/*-setup.exe")
           if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS installer' }
-          Copy-Item $installers[0].FullName artifacts/Nomo_strict-markdown_x64-setup.exe
+          $version = $env:NOMO_RELEASE_VERSION
+          Copy-Item $installers[0].FullName "artifacts/Nomo_${version}_x64-setup.exe"
           $app = Join-Path $env:RUNNER_TEMP 'Nomo-strict-markdown/Nomo'
           New-Item -ItemType Directory -Force "$app/samples/assets" | Out-Null
           Copy-Item "$release/nomo.exe" "$app/Nomo.exe"
@@ -86,32 +97,13 @@ jobs:
           Copy-Item sample.md "$app/samples/sample.md"
           Copy-Item assets/128x128.png "$app/samples/assets/128x128.png"
           Copy-Item LICENSE "$app/LICENSE"
-          Compress-Archive -Path $app -DestinationPath artifacts/Nomo_strict-markdown_x64.zip
+          Compress-Archive -Path $app -DestinationPath "artifacts/Nomo_${version}_x64.zip"
           Get-FileHash artifacts/*.exe, artifacts/*.zip -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))" } |
             Set-Content artifacts/SHA256SUMS.txt -Encoding utf8
-          $tests = Get-Content artifacts/tests.json -Raw | ConvertFrom-Json
-          @"
-          ## Windows x64 严格 Markdown 版本
-
-          - 下载 x64-setup.exe 安装，或解压 x64.zip 后运行 Nomo.exe。
-          - 所见即所得表格使用原生 table-layout:auto，由浏览器按真实 min-content/max-content 分配列宽；少列和短文本表格也占满内容区。
-          - 表格支持自然换行及连续长字符串断行，超宽内容在表格容器内滚动；视觉换行不改写 Markdown。
-          - 表格工具栏新增“复制表格”和“美化表格源码”；整表提供 Markdown/HTML，源码美化仅在点击时执行并支持独立撤销。
-          - 修复 Excel Ctrl+V 仅插入位图的问题：优先恢复 Windows 原生 HTML 表格，并补齐表格片段外壳；纯图片保留图片导入。
-          - 新增“复制为 Markdown”（Ctrl+Shift+C）；普通复制默认可见文字并保留显式偏好，剪贴板同时提供文本与 HTML。
-          - 普通粘贴优先转换 HTML，纯文本粘贴和代码区域保持字面值。
-          - 根据行首、表格、代码和链接上下文最小转义；PRI->Stage、A > B、REG[3:0] 不添加无意义转义。
-          - 保留未改动内容的源码格式、空格与换行；复制粘贴按上下文最小转义。
-          - 严格 Markdown 默认开启，以 GFM 为基础兼容 GitHub、GitLab 和 VS Code 预览。
-          - 保留原有及手动输入的 HTML；表格单元格内换行允许使用 <br>。
-          - 未编辑的表格保留原始格式；单元格编辑和列对齐尽量减少 Git 差异。
-          - 可在“设置 → 编辑器 → 严格 Markdown”关闭此模式，恢复 HTML 排版功能。
-
-          Windows 原生 MSVC 构建；类型检查通过，相关测试 $($tests.numPassedTests) 项通过、$($tests.numPendingTests) 项跳过。
-          全量测试另有原有失败；Windows 图形界面操作尚未实机验收。
-          此版本基于 Nomo 0.6.2，不覆盖原有稳定版。
-          "@ | Set-Content artifacts/RELEASE.md -Encoding utf8
+          Get-FileHash artifacts/*.exe, artifacts/*.zip -Algorithm MD5 |
+            ForEach-Object { "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))" } |
+            Set-Content artifacts/checksums.md5 -Encoding utf8
 
       - name: Publish Windows downloads
         env:
@@ -119,11 +111,13 @@ jobs:
           GH_REPO: ${{ github.repository }}
         shell: pwsh
         run: |
+          $version = $env:NOMO_RELEASE_VERSION
           gh release create "$env:GITHUB_REF_NAME" `
-            artifacts/Nomo_strict-markdown_x64-setup.exe `
-            artifacts/Nomo_strict-markdown_x64.zip `
+            "artifacts/Nomo_${version}_x64-setup.exe" `
+            "artifacts/Nomo_${version}_x64.zip" `
+            artifacts/checksums.md5 `
             artifacts/SHA256SUMS.txt `
             --verify-tag --prerelease --latest=false `
-            --title 'Nomo 0.6.2 · 原生表格布局与 Excel 粘贴修复（Windows x64）' `
-            --notes-file artifacts/RELEASE.md
+            --title "Nomo $version · Markdown 源码保留与更新源修复（Windows x64）" `
+            --notes-file ".github/release-notes/v$version.md"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

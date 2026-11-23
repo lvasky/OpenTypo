@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   deploy:
+    if: github.repository == 'nomo-md/nomo'
     name: Trigger download site deployments
     runs-on: ubuntu-latest
 
