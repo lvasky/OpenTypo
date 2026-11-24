@@ -427,6 +427,42 @@ describe('markdown serialization', () => {
 });
 
 describe('markdown input rules', () => {
+  it('renders a relative Markdown link as soon as its closing parenthesis is typed', () => {
+    const { target, view } = createInputRuleView();
+
+    try {
+      typeText(view, '打开 [scurve](./scurve) 后继续输入');
+
+      const link = target.querySelector('a');
+      expect(link?.getAttribute('href')).toBe('./scurve');
+      expect(link?.textContent).toBe('scurve');
+      expect(view.state.doc.textContent).toBe('打开 scurve 后继续输入');
+      expect(serializeMarkdown(view.state.doc)).toBe('打开 [scurve](./scurve) 后继续输入');
+    } finally {
+      view.destroy();
+      target.remove();
+    }
+  });
+
+  it.each([
+    '[scurve]\\(./scurve)',
+    '\\[scurve](./scurve)',
+    '[scurve](javascript:alert(1))',
+    '`[scurve](./scurve)`',
+    '![scurve](./scurve)',
+  ])('leaves %s outside the Markdown link input rule', (text) => {
+    const { target, view } = createInputRuleView();
+
+    try {
+      typeText(view, text);
+      expect(target.querySelector('a')).toBeNull();
+      expect(view.state.doc.textContent).toBe(text);
+    } finally {
+      view.destroy();
+      target.remove();
+    }
+  });
+
   it('converts --- into a horizontal rule while typing', () => {
     const { target, view } = createInputRuleView();
 

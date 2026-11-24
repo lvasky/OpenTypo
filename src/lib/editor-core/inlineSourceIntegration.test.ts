@@ -31,6 +31,25 @@ function setup(markdown: string) {
 }
 
 describe('inline source editor integration', () => {
+  it('renders a completed link in the middle of a paragraph without rewriting other blocks', () => {
+    const beforeCaret = '打开 [scurve](./scurve';
+    const source = '原有标题\n========\n\n' + beforeCaret + ' 后继续输入';
+    const { editor, view, target, destroy } = setup(source);
+
+    try {
+      const pos = view.state.doc.child(0).nodeSize + 1 + beforeCaret.length;
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)));
+      const handled = view.someProp('handleTextInput', (handler) =>
+        handler(view, pos, pos, ')', () => view.state.tr.insertText(')')));
+      expect(handled).toBe(true);
+      expect(target.querySelector('a[href="./scurve"]')?.textContent).toBe('scurve');
+      expect(view.state.selection.$from.parentOffset).toBe('打开 scurve'.length);
+      expect(editor.flushMarkdown()).toBe(source.replace('./scurve', './scurve)'));
+    } finally {
+      destroy();
+    }
+  });
+
   it('retains every delimiter caret position and deletes just one asterisk', () => {
     const { editor, view, destroy } = setup('**正文**');
     for (let position = 1; position <= 7; position++) {

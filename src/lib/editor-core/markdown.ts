@@ -969,6 +969,7 @@ export function createMarkdownInputRules() {
       return state.tr.replaceWith($start.before(), $start.after(),
         schema.nodes.toc_block.create({ sourceMarker: '[TOC]' }));
     }),
+    createMarkdownLinkInputRule(),
     createMathInlineInputRule(),
     textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, (match) => ({
       level: match[1].length,
@@ -977,6 +978,59 @@ export function createMarkdownInputRules() {
     textblockTypeInputRule(/^```$/, schema.nodes.code_block),
     createHorizontalRuleInputRule(),
   ];
+}
+
+function createMarkdownLinkInputRule(): InputRule {
+  // The input-rules plugin limits this context to its last 500 characters.
+  return new InputRule(/(?:^|(?<=[\n\ufffc]))[^\n\ufffc]*\]\([^\n\ufffc]*\)$/, (state, match, start, end) => {
+    const $start = state.doc.resolve(start);
+    const $end = state.doc.resolve(end);
+    const block = $start.parent;
+    if (!$start.sameParent($end) || !isInlineSourceBlock(block)) return null;
+
+    const source = match[0];
+    const tokens = markdownIt.parseInline(source, {})[0]?.children ?? [];
+    const close = tokens.at(-1);
+    if (close?.type !== 'link_close' || inlineTokenSourceRange(close)?.to !== source.length)
+      return null;
+    const open = tokens[findLastIndex(tokens, (token) => token.type === 'link_open')];
+    const range = open && inlineTokenSourceRange(open);
+    if (!range || source[range.from] !== '[' || !normalizeLinkHref(open.attrGet('href'))) return null;
+
+    const from = start + range.from;
+    if (from > Math.min(end, state.selection.from)) return null;
+    const blockStart = $start.start();
+    const fromOffset = from - blockStart;
+    const toOffset = end - blockStart;
+    if (analyzeInlineSource(block).spans.some(
+      (span) => span.type === 'code' && fromOffset < span.closeTo && toOffset > span.openFrom,
+    )) return null;
+
+    // Do not convert a link while the user is still typing its enclosing code span.
+    for (const marker of source.slice(0, range.from).matchAll(/\\.|`+/g)) {
+      if (marker[0][0] !== '`') continue;
+      const isClosedCode = tokens.some((token) => {
+        if (token.type !== 'code_inline' && token.type !== 'inline_source_code') return false;
+        const code = inlineTokenSourceRange(token);
+        return code && marker.index >= code.from && marker.index < code.to;
+      });
+      if (!isClosedCode) return null;
+    }
+
+    let canReplace = true;
+    state.doc.nodesBetween(from, end, (node) => {
+      if (node.isInline && (!node.isText || node.marks.some(
+        (mark) => mark.type !== schema.marks.inline_source || mark.attrs.literal === true,
+      ))) canReplace = false;
+    });
+    if (!canReplace) return null;
+
+    const link = tryParseMarkdown(source.slice(range.from))?.firstChild;
+    if (link?.type !== schema.nodes.paragraph ||
+        !link.rangeHasMark(0, link.content.size, schema.marks.link)) return null;
+    const next = block.content.cut(0, fromOffset).append(link.content).append(block.content.cut(toOffset));
+    return block.type.validContent(next) ? state.tr.replaceWith(from, end, link.content) : null;
+  }, { inCodeMark: false });
 }
 
 function createMathInlineInputRule(): InputRule {
