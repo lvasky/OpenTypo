@@ -21,21 +21,18 @@ export type QuickInsertEditorCommand = Extract<
       | 'insertCodeBlock'
       | 'toggleBlockquote'
       | 'insertCallout'
-      | 'insertDetails'
       | 'insertHorizontalRule'
       | 'insertMathBlock'
       | 'insertMathInline'
       | 'insertDiagramBlock'
-      | 'insertCommentInline'
-      | 'insertCommentBlock';
+      | 'insertFootnote';
   }
 >;
 
 export type QuickInsertCommand =
   | QuickInsertEditorCommand
-  | { type: 'chooseImage' }
-  | { type: 'chooseEmoji' }
-  | { type: 'chooseLink' };
+  | { type: 'insertImageTemplate' }
+  | { type: 'insertLinkTemplate' };
 
 export interface QuickInsertVariant {
   label: () => string;
@@ -118,19 +115,19 @@ export const QUICK_INSERT_CATEGORIES: QuickInsertCategory[] = [
     id: 'image',
     label: () => t.image(),
     icon: 'image',
-    variants: [{ label: () => '', command: { type: 'chooseImage' } }],
-  },
-  {
-    id: 'details',
-    label: () => t.details(),
-    icon: 'quote',
-    variants: [{ label: () => '', command: { type: 'insertDetails' } }],
+    variants: [{ label: () => '', command: { type: 'insertImageTemplate' } }],
   },
   {
     id: 'link',
     label: () => t.link(),
     icon: 'link',
-    variants: [{ label: () => '', command: { type: 'chooseLink' } }],
+    variants: [{ label: () => '', command: { type: 'insertLinkTemplate' } }],
+  },
+  {
+    id: 'footnote',
+    label: () => t.insertFootnote(),
+    icon: 'footnote',
+    variants: [{ label: () => '', command: { type: 'insertFootnote' } }],
   },
   {
     id: 'math',
@@ -151,22 +148,9 @@ export const QUICK_INSERT_CATEGORIES: QuickInsertCategory[] = [
     })),
   },
   {
-    id: 'comment',
-    label: () => t.comment(),
-    icon: 'comment',
-    variants: [
-      { label: () => t.quickInsertInline(), command: { type: 'insertCommentInline', content: '' } },
-      { label: () => t.quickInsertBlock(), command: { type: 'insertCommentBlock', content: '' } },
-    ],
-  },
-  {
     id: 'divider',
     label: () => t.horizontalRule(),
     icon: 'divider',
     variants: [{ label: () => '', command: { type: 'insertHorizontalRule' } }],
-  },
-  {
-    id: 'emoji', label: () => t.emojiInsert(), icon: 'emoji',
-    variants: [{ label: () => '', command: { type: 'chooseEmoji' } }],
   },
 ];

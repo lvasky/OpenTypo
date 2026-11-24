@@ -223,7 +223,7 @@
     data-interface-locale={interfaceLocale}
   >
     <div class="toolbar-actions-scroll" use:trackToolbarScroll>
-    <div class="toolbar-group toolbar-group-core">
+    <div class="toolbar-group toolbar-group-core toolbar-group-standard">
       <button
         title={t.title()}
         aria-label={t.setHeadingOne()}
@@ -260,42 +260,6 @@
         <Strikethrough size={17} />
       </button>
       <button
-        title={t.underline()}
-        aria-label={t.toggleUnderline()}
-        class:active={pendingInlineMarks.underline}
-        on:mousedown|preventDefault
-        on:click={() => runCommand({ type: 'toggleUnderline' })}
-      >
-        <Underline size={17} />
-      </button>
-      <button
-        title={t.highlight()}
-        aria-label={t.toggleHighlight()}
-        class:active={pendingInlineMarks.highlight}
-        on:mousedown|preventDefault
-        on:click={() => runCommand({ type: 'toggleHighlight' })}
-      >
-        <Highlighter size={17} />
-      </button>
-      <button
-        title={t.superscript()}
-        aria-label={t.toggleSuperscript()}
-        class:active={pendingInlineMarks.superscript}
-        on:mousedown|preventDefault
-        on:click={() => runCommand({ type: 'toggleSuperscript' })}
-      >
-        <Superscript size={17} />
-      </button>
-      <button
-        title={t.subscript()}
-        aria-label={t.toggleSubscript()}
-        class:active={pendingInlineMarks.subscript}
-        on:mousedown|preventDefault
-        on:click={() => runCommand({ type: 'toggleSubscript' })}
-      >
-        <Subscript size={17} />
-      </button>
-      <button
         title={t.link()}
         aria-label={t.editLink()}
         on:mousedown|preventDefault
@@ -305,15 +269,7 @@
       </button>
     </div>
 
-    <div class="toolbar-group toolbar-group-medium">
-      <button
-        title={t.inlineComment()}
-        aria-label={t.insertInlineComment()}
-        on:mousedown|preventDefault
-        on:click={() => runCommand({ type: 'insertCommentInline' })}
-      >
-        <MessageSquare size={17} />
-      </button>
+    <div class="toolbar-group toolbar-group-medium toolbar-group-standard">
       <button
         title={t.quote()}
         aria-label={t.toggleQuote()}
@@ -321,18 +277,6 @@
         on:click={() => runCommand({ type: 'toggleBlockquote' })}
       >
         <Quote size={17} />
-      </button>
-      <button
-        title={t.callout()}
-        aria-label={t.insertCallout()}
-        on:mousedown|preventDefault
-        on:click={() => runCommand({ type: 'insertCallout' })}
-      >
-        <Info size={17} />
-      </button>
-      <button title={t.details()} aria-label={t.insertDetails()} on:mousedown|preventDefault
-        on:click={() => runCommand({ type: 'insertDetails' })}>
-        <PanelTopClose size={17} />
       </button>
       <button
         title={t.unorderedList()}
@@ -352,7 +296,7 @@
       </button>
     </div>
 
-    <div class="toolbar-group toolbar-group-low">
+    <div class="toolbar-group toolbar-group-low toolbar-group-standard">
       <div class="table-picker-anchor" use:clickOutside={closeTablePicker}>
         <button
           title={t.table()}
@@ -407,8 +351,83 @@
       >
         <Code2 size={17} />
       </button>
+      <button
+        title={t.insertFootnote()}
+        aria-label={t.insertFootnote()}
+        on:mousedown|preventDefault
+        on:click={() => runCommand({ type: 'insertFootnote' })}
+      >
+        <Superscript size={17} />
+      </button>
+      <button
+        title={t.insertToc()}
+        aria-label={t.insertToc()}
+        on:mousedown|preventDefault
+        on:click={() => runCommand({ type: 'insertToc' })}
+      >
+        <TableOfContents size={17} />
+      </button>
+    </div>
+    <div class="toolbar-group toolbar-group-extensions">
+      <span class="divider" aria-hidden="true"></span>
+      <button
+        title={t.nonstandardMarkdownTooltip({ label: t.underline() })}
+        aria-label={t.toggleUnderline()}
+        class:active={pendingInlineMarks.underline}
+        on:mousedown|preventDefault
+        on:click={() => runCommand({ type: 'toggleUnderline' })}
+      >
+        <Underline size={17} />
+      </button>
+      <button
+        title={t.nonstandardMarkdownTooltip({ label: t.highlight() })}
+        aria-label={t.toggleHighlight()}
+        class:active={pendingInlineMarks.highlight}
+        on:mousedown|preventDefault
+        on:click={() => runCommand({ type: 'toggleHighlight' })}
+      >
+        <Highlighter size={17} />
+      </button>
+      <button
+        title={t.nonstandardMarkdownTooltip({ label: t.subscript() })}
+        aria-label={t.toggleSubscript()}
+        class:active={pendingInlineMarks.subscript}
+        on:mousedown|preventDefault
+        on:click={() => runCommand({ type: 'toggleSubscript' })}
+      >
+        <Subscript size={17} />
+      </button>
+      <button
+        title={t.nonstandardMarkdownTooltip({ label: t.superscript() })}
+        aria-label={t.toggleSuperscript()}
+        class:active={pendingInlineMarks.superscript}
+        on:mousedown|preventDefault
+        on:click={() => runCommand({ type: 'toggleSuperscript' })}
+      >
+        <Superscript size={17} />
+      </button>
+      <button
+        title={t.nonstandardMarkdownTooltip({ label: t.inlineComment() })}
+        aria-label={t.insertInlineComment()}
+        on:mousedown|preventDefault
+        on:click={() => runCommand({ type: 'insertCommentInline' })}
+      >
+        <MessageSquare size={17} />
+      </button>
+      <button title={t.nonstandardMarkdownTooltip({ label: t.details() })} aria-label={t.insertDetails()} on:mousedown|preventDefault
+        on:click={() => runCommand({ type: 'insertDetails' })}>
+        <PanelTopClose size={17} />
+      </button>
+      <button
+        title={t.nonstandardMarkdownTooltip({ label: t.callout() })}
+        aria-label={t.insertCallout()}
+        on:mousedown|preventDefault
+        on:click={() => runCommand({ type: 'insertCallout' })}
+      >
+        <Info size={17} />
+      </button>
       <div class="diagram-picker-anchor" use:clickOutside={() => mathPickerOpen = false}>
-        <button title={t.mathFormula()} aria-label={t.insertMathFormula()} aria-haspopup="menu"
+        <button title={t.nonstandardMarkdownTooltip({ label: t.mathFormula() })} aria-label={t.insertMathFormula()} aria-haspopup="menu"
           aria-expanded={mathPickerOpen} class:active={mathPickerOpen} on:mousedown|preventDefault
           on:click|stopPropagation={toggleMathPicker}>
           <Sigma size={17} />
@@ -429,7 +448,7 @@
       </div>
       <div class="diagram-picker-anchor" use:clickOutside={closeDiagramPicker}>
         <button
-          title={t.diagram()}
+          title={t.nonstandardMarkdownTooltip({ label: t.diagram() })}
           aria-haspopup="menu"
           aria-expanded={diagramPickerOpen}
           aria-label={t.insertDiagram()}
@@ -461,22 +480,6 @@
           </div>
         {/if}
       </div>
-      <button
-        title={t.insertFootnote()}
-        aria-label={t.insertFootnote()}
-        on:mousedown|preventDefault
-        on:click={() => runCommand({ type: 'insertFootnote' })}
-      >
-        <Superscript size={17} />
-      </button>
-      <button
-        title={t.insertToc()}
-        aria-label={t.insertToc()}
-        on:mousedown|preventDefault
-        on:click={() => runCommand({ type: 'insertToc' })}
-      >
-        <TableOfContents size={17} />
-      </button>
     </div>
     <span class="divider toolbar-actions-divider"></span>
     </div>

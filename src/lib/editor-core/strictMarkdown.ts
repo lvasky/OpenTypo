@@ -5,17 +5,8 @@ import type { EditorCommand } from './types';
 
 const markdownMarks = new Set(['em', 'strong', 'code', 'strikethrough', 'link', 'inline_source']);
 
-export function requiresHtmlCommand(command: EditorCommand): boolean {
-  return [
-    'toggleUnderline',
-    'toggleHighlight',
-    'toggleSuperscript',
-    'toggleSubscript',
-    'insertDetails',
-    'insertCommentInline',
-    'insertCommentBlock',
-    'toggleTableHeader',
-  ].includes(command.type);
+export function isBlockedInStrictMarkdown(command: EditorCommand): boolean {
+  return command.type === 'insertCommentBlock' || command.type === 'toggleTableHeader';
 }
 
 /** Rich clipboard styles are not permission to add HTML to the Markdown source. */

@@ -730,10 +730,23 @@ describe('createEditorCore', () => {
     const editor = createEditorCore({ markdown: '# 标题1\n\n## 标题2', target });
 
     expect(editor.execute({ type: 'insertToc' })).toBe(true);
-    expect(editor.getMarkdown()).toContain('<!-- toc -->');
-    expect(editor.getMarkdown()).toContain('- [标题1](#标题1)');
-    expect(editor.getMarkdown()).toContain('  - [标题2](#标题2)');
-    expect(target.querySelector('.toc-block')).not.toBeNull();
+    expect(editor.getMarkdown()).toBe('[TOC]\n\n# 标题1\n\n## 标题2');
+    expect(Array.from(target.querySelectorAll('.toc-link')).map((link) => link.querySelector('.toc-text')?.textContent))
+      .toEqual(['标题1', '标题2']);
+  });
+
+  it('renders an inserted TOC outside the active list immediately', () => {
+    const target = document.createElement('div');
+    const editor = createEditorCore({ markdown: '# Title\n\n- nested item', target });
+    const view = (editor as unknown as { view: EditorView }).view;
+    const item = findNodeByText(view.state.doc, 'paragraph', 'nested item');
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, item.pos + 4)));
+
+    expect(editor.execute({ type: 'insertToc' })).toBe(true);
+    expect(view.state.doc.child(2).type.name).toBe('toc_block');
+    expect(target.querySelector('.toc-block .toc-text')?.textContent).toBe('Title');
+    expect(editor.getMarkdown()).toBe('# Title\n\n- nested item\n\n[TOC]');
+    editor.destroy();
   });
 
   it('updates toc block content when headings change', () => {
@@ -813,7 +826,7 @@ describe('createEditorCore', () => {
 
     editor.execute({ type: 'insertToc' });
 
-    expect(editor.getMarkdown()).toContain('<!-- toc -->\n<!-- /toc -->');
+    expect(editor.getMarkdown()).toContain('[TOC]');
     expect(target.querySelector('.toc-empty')?.textContent).toContain(
       'This document has no headings yet',
     );

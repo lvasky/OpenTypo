@@ -47,11 +47,6 @@ export interface EditorSelectionSnapshot {
   head: number;
 }
 
-export interface EditorQuickInsertPickerEvent {
-  kind: 'image' | 'link' | 'emoji';
-  selection: EditorSelectionSnapshot;
-}
-
 export interface EditorLinkSnapshot {
   href: string;
   title: string | null;
@@ -237,8 +232,6 @@ export interface EditorCoreOptions {
   /** Write the whole active table without changing the editor selection. */
   onCopyTable?: (payload: EditorClipboardPayload) => void;
   onLinkShortcut?: () => void;
-  /** 确认选择后才替换事件中的触发符号选区；返回是否打开了选择窗口。 */
-  onQuickInsertPicker?: (event: EditorQuickInsertPickerEvent) => boolean;
   onOpenLink?: (href: string) => void;
   getImageContext?: () => ImageContext;
   onImagesDeleted?: (event: EditorImageDeletionEvent) => void;

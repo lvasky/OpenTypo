@@ -8,7 +8,6 @@ import type { EditorCore } from './types';
 import { TextSelection } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { detailsIsOpen, setDetailsTemporaryOpen } from './details/detailsState';
-import { insertQuickInsertContent } from './editorCommands';
 
 const block = (body = '正文', title = '标题', open = false) =>
   `<details${open ? ' open' : ''}>\n<summary>${title}</summary>\n\n${body}\n\n</details>`;
@@ -308,16 +307,6 @@ describe('details editing', () => {
     expect(detailsIsOpen(f.view().state, 0)).toBe(true);
     f.key('Backspace');
     expect(f.view().state.selection.$from.parent.type.name).toBe('details_summary');
-  });
-
-  it('quick insert removes trigger and focuses title in one undo step', () => {
-    const f = editorFixture('/');
-    f.select(2);
-    expect(insertQuickInsertContent(f.view(), 1, 2, { type: 'insertDetails' })).toBe(true);
-    expect(f.view().state.selection.$from.parent.type.name).toBe('details_summary');
-    expect(detailsIsOpen(f.view().state, 0)).toBe(true);
-    f.editor.execute({ type: 'undo' });
-    expect(f.editor.getMarkdown()).toBe('/');
   });
 
   it('keeps rich title editing history through tab remount', () => {

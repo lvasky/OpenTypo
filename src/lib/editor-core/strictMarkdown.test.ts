@@ -59,14 +59,18 @@ describe('strict Markdown', () => {
     selectText(view, '\\> quote');
     expect(editor.getClipboardPayload()?.text).toBe('\\> quote');
   });
-  it('is enabled by default, blocks automatic HTML commands and supports an explicit opt-out', () => {
+  it.each([
+    ['toggleUnderline', '<u>hello</u>'],
+    ['toggleHighlight', '<mark>hello</mark>'],
+    ['toggleSuperscript', '^hello^'],
+    ['toggleSubscript', '~hello~'],
+    ['insertCommentInline', '<!-- hello -->'],
+    ['insertDetails', '<details>'],
+  ] as const)('allows the explicit %s command with strict Markdown enabled', (type, expected) => {
     const { editor, view } = open('hello');
     selectText(view, 'hello');
-    expect(editor.execute({ type: 'toggleUnderline' })).toBe(false);
-    expect(editor.execute({ type: 'insertDetails' })).toBe(false);
-    editor.updateOptions({ strictMarkdown: false });
-    expect(editor.execute({ type: 'toggleUnderline' })).toBe(true);
-    expect(editor.getMarkdown()).toContain('<u>hello</u>');
+    expect(editor.execute({ type })).toBe(true);
+    expect(editor.getMarkdown()).toContain(expected);
   });
 
   it('keeps an irregular table verbatim on open, save, and unrelated edits', () => {

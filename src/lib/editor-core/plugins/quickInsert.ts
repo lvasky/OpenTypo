@@ -1,9 +1,8 @@
 import { Plugin, PluginKey, type EditorState } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
-import { closeHistory } from 'prosemirror-history';
 import { onInterfaceLocaleChanged, t } from '../../../app/i18n';
 import { insertQuickInsertContent } from '../editorCommands';
-import type { EditorCommand, EditorQuickInsertPickerEvent } from '../types';
+import type { EditorCommand } from '../types';
 import { isQuickInsertTrigger, QUICK_INSERT_CATEGORIES } from '../quickInsert';
 import { analyzeInlineSource } from '../InlineSourceCodec';
 import { getEmptyInlineTemplateFormats } from './inlineSourceEditing';
@@ -21,7 +20,6 @@ interface QuickInsertOptions {
   enabled: boolean;
   trigger: string;
   canInsert?: (command: EditorCommand) => boolean;
-  onChoose?: (event: EditorQuickInsertPickerEvent) => boolean;
 }
 
 type QuickInsertAction =
@@ -71,23 +69,10 @@ function insertSelected(view: EditorView, getOptions: () => QuickInsertOptions):
   if (!session) return false;
   const category = QUICK_INSERT_CATEGORIES[session.category];
   const command = category.variants[session.variants[session.category]].command;
-  let inserted: boolean;
-  if (command.type === 'chooseImage' || command.type === 'chooseLink' || command.type === 'chooseEmoji') {
-    inserted =
-      getOptions().onChoose?.({
-        kind: command.type === 'chooseImage' ? 'image' : command.type === 'chooseEmoji' ? 'emoji' : 'link',
-        selection: { anchor: session.from, head: session.to },
-      }) ?? false;
-    if (inserted)
-      view.dispatch(
-        closeHistory(view.state.tr)
-          .setMeta(quickInsertKey, { type: 'close' })
-          .setMeta('addToHistory', false),
-      );
-  } else {
-    inserted = getOptions().canInsert?.(command) !== false && insertQuickInsertContent(view, session.from, session.to, command);
-    if (inserted && command.type === 'insertMathInline') dismissQuickInsert(view);
-  }
+  const isTemplate = command.type === 'insertImageTemplate' || command.type === 'insertLinkTemplate';
+  const inserted = (isTemplate || getOptions().canInsert?.(command) !== false) &&
+    insertQuickInsertContent(view, session.from, session.to, command);
+  if (inserted && command.type === 'insertMathInline') dismissQuickInsert(view);
   if (!inserted) changeMenu(view, { type: 'unavailable' });
   return inserted;
 }
@@ -230,7 +215,6 @@ export function quickInsertPlugin(getOptions: () => QuickInsertOptions): Plugin 
 let nextMenuId = 0;
 
 const ICON_PATHS: Record<string, string[]> = {
-  emoji: ['M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20', 'M8 9h.01M16 9h.01M7 14a5 5 0 0 0 10 0'],
   heading: ['M6 4v16M18 4v16M6 12h12'],
   list: ['M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01'],
   table: ['M3 3h18v18H3zM3 9h18M9 3v18M3 15h18'],
@@ -238,13 +222,13 @@ const ICON_PATHS: Record<string, string[]> = {
   quote: ['M3 3h7v7H3zM14 3h7v7h-7zM10 10v4a5 5 0 0 1-5 5M21 10v4a5 5 0 0 1-5 5'],
   callout: ['M12 8v4m0 4h.01', 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20'],
   image: ['M3 3h18v18H3zM3 17l6-6 4 4 3-3 5 5', 'M8 7h.01'],
+  footnote: ['M8 18h8', 'M12 18V6l-3 2'],
   link: [
     'M10 13a5 5 0 0 0 7 .5l3-3a5 5 0 0 0-7-7l-2 2',
     'M14 11a5 5 0 0 0-7-.5l-3 3a5 5 0 0 0 7 7l2-2',
   ],
   math: ['M19 4H5l7 8-7 8h14'],
   diagram: ['M8 3h8v5H8zM3 16h6v5H3zM15 16h6v5h-6zM12 8v4M6 16v-4h12v4'],
-  comment: ['M21 11a8 8 0 0 1-8 8H7l-4 3V11a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z', 'M7 9h10M7 13h6'],
   divider: ['M4 12h16'],
   previous: ['m14 6-6 6 6 6'],
   next: ['m10 6 6 6-6 6'],

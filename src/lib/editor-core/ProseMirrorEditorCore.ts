@@ -1,5 +1,5 @@
 import { serializeSourceChange } from './sourcePreservation';
-import { requiresHtmlCommand, strictMarkdownPaste } from './strictMarkdown';
+import { isBlockedInStrictMarkdown, strictMarkdownPaste } from './strictMarkdown';
 import { tableSourcePlugin } from './tableSource';
 import { createTableClipboardPayload } from './tableActions';
 import {
@@ -1543,7 +1543,7 @@ export class ProseMirrorEditorCore implements EditorCore {
   }
 
   canExecute(command: EditorCommand): boolean {
-    if (this.runtime.strictMarkdown && requiresHtmlCommand(command)) return false;
+    if (this.runtime.strictMarkdown && isBlockedInStrictMarkdown(command)) return false;
     if (this.destroyed || this.runtime.readonly) {
       return false;
     }
@@ -1687,7 +1687,6 @@ export class ProseMirrorEditorCore implements EditorCore {
         quickInsertPlugin(() => ({
           enabled: this.isEditable() && (this.runtime.quickInsertEnabled ?? true),
           trigger: this.runtime.quickInsertTrigger ?? DEFAULT_QUICK_INSERT_TRIGGER,
-          onChoose: this.options.onQuickInsertPicker,
           canInsert: (command) => this.canExecute(command),
         })),
         blockAlignmentPlugin(),
@@ -1746,7 +1745,7 @@ export class ProseMirrorEditorCore implements EditorCore {
             return Boolean(this.options.onLinkShortcut);
           },
           'Alt-Shift-5': toggleInlineSourceFormat('strikethrough'),
-          'Mod-u': () => this.runtime.strictMarkdown ? true : this.runProseMirrorCommand({ type: 'toggleUnderline' }),
+          'Mod-u': () => this.runProseMirrorCommand({ type: 'toggleUnderline' }),
           'Mod-\\': (_state, _dispatch, _view) =>
             this.runProseMirrorCommand({ type: 'clearInlineStyles' }),
           'Ctrl-\\': (_state, _dispatch, _view) =>

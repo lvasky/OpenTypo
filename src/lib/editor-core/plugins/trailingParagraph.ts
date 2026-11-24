@@ -87,7 +87,8 @@ export function trailingParagraphPlugin(): Plugin {
         if (!isFullyCoveredByInsertedRange(offset, offset + node.nodeSize, insertedRanges)) return;
 
         const nextNode = index + 1 < newState.doc.childCount ? newState.doc.child(index + 1) : null;
-        if (nextNode?.type === schema.nodes.paragraph) return;
+        if (nextNode?.type === schema.nodes.paragraph ||
+            (node.type === schema.nodes.toc_block && nextNode?.isTextblock)) return;
 
         insertPositions.push(offset + node.nodeSize);
       });

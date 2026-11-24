@@ -1,5 +1,5 @@
 import { Fragment, type ResolvedPos } from 'prosemirror-model';
-import { NodeSelection, Plugin, PluginKey, type EditorState } from 'prosemirror-state';
+import { NodeSelection, Plugin, PluginKey, type EditorState, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import { t } from '../../../app/i18n';
 import { serializeMarkdown, tryParseMarkdown } from '../markdown';
@@ -19,6 +19,17 @@ interface SourceState {
 }
 
 const sourceEditorKey = new PluginKey<SourceState>('markdown-source-editor');
+const focusSourceEditor = 'focusMarkdownSourceEditor';
+
+interface SourceEditorFocus {
+  pos: number;
+  start: number;
+  end: number;
+}
+
+export function requestMarkdownSourceEditor(tr: Transaction, focus: SourceEditorFocus): void {
+  tr.setMeta(focusSourceEditor, focus);
+}
 
 function rangeAt($pos: ResolvedPos, hover: boolean): SourceRange | null {
   const { parent, parentOffset, pos } = $pos;
@@ -67,7 +78,12 @@ function sourceText(state: EditorState, range: SourceRange): string {
   return serializeMarkdown(doc.create(null, paragraph.create(null, content)));
 }
 
-function createSourceField(range: SourceRange, view: EditorView, getPos: () => number | undefined) {
+function createSourceField(
+  range: SourceRange,
+  view: EditorView,
+  getPos: () => number | undefined,
+  focus?: SourceEditorFocus,
+) {
   const widget = document.createElement('span');
   widget.className = 'pm-markdown-source-widget';
   const input = document.createElement('input');
@@ -82,10 +98,14 @@ function createSourceField(range: SourceRange, view: EditorView, getPos: () => n
     const bounds = (view.dom.closest('.semantic-pane') ?? view.dom).getBoundingClientRect();
     const anchor = widget.getBoundingClientRect();
     const width = Math.max(0, Math.min(448, bounds.width - 16));
-    input.style.inlineSize = `${width}px`;
+    if (width) input.style.inlineSize = `${width}px`;
     const left = Math.max(bounds.left + 8, Math.min(anchor.left, bounds.right - width - 8));
     input.style.insetInlineStart = `${left - anchor.left}px`;
     if (anchor.top < bounds.top + 54) widget.classList.add('is-below');
+    if (focus && view.editable && view.hasFocus()) {
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(focus.start, focus.end);
+    }
   });
   let composing = false;
   let compositionDone: Promise<void> = Promise.resolve();
@@ -172,15 +192,17 @@ export function markdownSourceEditorPlugin(): Plugin<SourceState> {
     state: {
       init: () => ({ hovered: null, range: null, decorations: DecorationSet.empty }),
       apply(tr, previous, _old, state) {
+        const focus = tr.getMeta(focusSourceEditor) as SourceEditorFocus | undefined;
         const hover = tr.getMeta(sourceEditorKey) as { pos: number | null } | undefined;
-        if (!hover && !tr.docChanged && !tr.selectionSet) return previous;
+        if (!focus && !hover && !tr.docChanged && !tr.selectionSet) return previous;
         const hovered = hover ? hover.pos
           : tr.selectionSet || previous.hovered === null ? null
           : tr.mapping.map(previous.hovered);
-        const range = hovered !== null ? rangeAt(state.doc.resolve(hovered), true)
+        const range = focus ? rangeAt(state.doc.resolve(focus.pos), true)
+          : hovered !== null ? rangeAt(state.doc.resolve(hovered), true)
           : state.selection.empty || (state.selection instanceof NodeSelection && state.selection.node.type.name === 'image')
             ? rangeAt(state.selection.$from, false) : null;
-        if (range && previous.range?.from === range.from &&
+        if (!focus && range && previous.range?.from === range.from &&
             previous.range.definitionId === range.definitionId && previous.range.content.eq(range.content)) {
           return { ...previous, hovered };
         }
@@ -188,7 +210,7 @@ export function markdownSourceEditorPlugin(): Plugin<SourceState> {
         if (range) {
           let destroy: (() => void) | undefined;
           decorations = DecorationSet.create(state.doc, [Decoration.widget(range.from, (view, getPos) => {
-            const field = createSourceField(range, view, getPos);
+            const field = createSourceField(range, view, getPos, focus);
             destroy = field.destroy;
             return field.widget;
           }, { side: -1, stopEvent: () => true, ignoreSelection: true, destroy: () => destroy?.() })]);

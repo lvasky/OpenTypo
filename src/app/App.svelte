@@ -44,7 +44,6 @@
     type InlinePendingMarks,
     type EditorMode,
     type EditorPasteMode,
-    type EditorQuickInsertPickerEvent,
     type EditorSearchMatch,
     type EditorSelectionSnapshotEvent,
     type EditorThemeOptions,
@@ -435,7 +434,6 @@
   let expandedFolders = new Set<string>();
   let tablePickerOpen = false;
   let linkPickerOpen = false;
-  let quickInsertLinkTarget: QuickInsertPickerTarget | null = null;
   let emojiPickerComponent: typeof import('./components/EmojiPicker.svelte').default | null = null;
   type EmojiPickerTarget = EmojiInsertionTarget & {
     anchor: { left: number; top: number; bottom: number };
@@ -3635,39 +3633,8 @@
     });
   }
 
-  type QuickInsertPickerTarget = EditorQuickInsertPickerEvent & {
-    tabId: string;
-    editor: EditorCore;
-    contentRevision: number;
-  };
-
-  function openQuickInsertPicker(tabId: string, event: EditorQuickInsertPickerEvent): boolean {
-    const runtime = documentRuntimes.get(tabId);
-    if (!runtime || runtime.disposed || runtime.mode === 'source' || workspaceInteractionDisabled)
-      return false;
-    focusComparisonDocument(tabId);
-    if (activeTabId !== tabId || editor !== runtime.editor || readonlyDocumentMode) return false;
-    const snapshot = runtime.editor.getSnapshot();
-    const target: QuickInsertPickerTarget = {
-      ...event,
-      tabId,
-      editor: runtime.editor,
-      contentRevision: snapshot.contentRevision ?? snapshot.version,
-    };
-    if (event.kind === 'emoji') return openEmojiPicker(undefined, event.selection);
-    if (event.kind === 'image') return chooseImageForContextMenu(target);
-    openLinkPicker();
-    if (!linkPickerOpen) return false;
-    quickInsertLinkTarget = target;
-    linkText = '';
-    linkHref = '';
-    linkCanRemove = false;
-    linkDraftTitle = null;
-    return true;
-  }
-
-  function openEmojiPicker(event?: MouseEvent, selectionOverride?: { anchor: number; head: number }): boolean {
-    if (emojiPickerTarget && !selectionOverride) { closeEmojiPicker(); return true; }
+  function openEmojiPicker(event?: MouseEvent): boolean {
+    if (emojiPickerTarget) { closeEmojiPicker(); return true; }
     const runtime = documentRuntimes.get(activeTabId);
     if (!runtime || runtime.disposed || runtime.editor !== editor || isSwitchingTab || readonlyDocumentMode || workspaceInteractionDisabled || largeDocumentMode) return false;
     const activeMode = getActiveEditorMode();
@@ -3676,7 +3643,7 @@
     if (source?.isComposing?.()) return false;
     const sourceSnapshot = source?.getSelectionStatsSnapshot?.();
     const snapshot = activeMode === 'semantic' ? editor.getSnapshot() : null;
-    const selection = selectionOverride ?? snapshot?.selection ?? (sourceSnapshot ? { anchor: sourceSnapshot.from, head: sourceSnapshot.to } : null);
+    const selection = snapshot?.selection ?? (sourceSnapshot ? { anchor: sourceSnapshot.from, head: sourceSnapshot.to } : null);
     if (!selection || (activeMode === 'source' && sourceSnapshot?.documentId !== activeTabId)) return false;
     const button = event?.currentTarget instanceof HTMLElement ? event.currentTarget.getBoundingClientRect() : null;
     const caret = activeMode === 'semantic' ? editor.getSelectionAnchorRect() : null;
@@ -3717,7 +3684,7 @@
     if (target) insertEmojiAtTarget(target, emojiInsertionContext(target), entry.unicode);
   }
 
-  function chooseImageForContextMenu(target?: QuickInsertPickerTarget): boolean {
+  function chooseImageForContextMenu(): boolean {
     const runtime = documentRuntimes.get(activeTabId);
     if (!runtime || runtime.disposed) return false;
     const input = document.createElement('input');
@@ -3727,7 +3694,7 @@
     input.addEventListener('change', () => {
       const files = Array.from(input.files ?? []);
       if (files.length && !runtime.disposed && documentRuntimes.get(runtime.tabId) === runtime)
-        void runtime.images.insertImageFiles(files, target);
+        void runtime.images.insertImageFiles(files);
     });
     input.click();
     return true;
@@ -3819,7 +3786,6 @@
     onCopyTable: copyTableToClipboard,
     onError: (error) => showVisibleError(error, error.message),
     onLinkShortcut: () => openLinkPicker(),
-    onQuickInsertPicker: (event) => openQuickInsertPicker(activeTabId, event),
     onOpenLink: (href) => openLinkFromEditor(href),
     getImageContext: () => getImageContext(),
     onImagesDeleted: (event) => handleDeletedImageResources(event, activeTabId, bootEditor),
@@ -3867,7 +3833,6 @@
       onCopyTable: copyTableToClipboard,
       onError: (error) => showVisibleError(error, error.message),
       onLinkShortcut: () => { void switchTab(tab.id).then(openLinkPicker); },
-      onQuickInsertPicker: (event) => openQuickInsertPicker(tab.id, event),
       onOpenLink: (href) => openLinkFromEditor(href, tab.id),
       getImageContext: () => getImageContext(tab.id),
       onImagesDeleted: (event) => handleDeletedImageResources(event, tab.id, core),
@@ -7110,7 +7075,6 @@
       return;
     }
 
-    quickInsertLinkTarget = null;
     const activeLink = editor.getActiveLink();
     linkText = activeLink?.text ?? '';
     linkHref = activeLink?.href ?? '';
@@ -7235,7 +7199,6 @@
 
   function closeLinkPicker() {
     linkPickerOpen = false;
-    quickInsertLinkTarget = null;
     linkText = '';
     linkError = '';
     linkCanRemove = false;
@@ -7256,40 +7219,13 @@
       return;
     }
 
-    const target = quickInsertLinkTarget;
-    if (target) {
-      const runtime = documentRuntimes.get(target.tabId);
-      if (
-        !runtime ||
-        runtime.disposed ||
-        runtime.editor !== target.editor ||
-        editor !== target.editor ||
-        activeTabId !== target.tabId ||
-        getActiveEditorMode() !== 'semantic' ||
-        readonlyDocumentMode
-      ) {
-        linkError = t.quickInsertUnavailable();
-        return;
-      }
-      const snapshot = target.editor.getSnapshot();
-      if ((snapshot.contentRevision ?? snapshot.version) !== target.contentRevision) {
-        linkError = t.quickInsertSelectionChanged();
-        return;
-      }
-      target.editor.restoreSelectionSnapshot(target.selection);
-    }
     const applied = editor.execute({
       type: 'insertLink',
       href: linkHref,
       title: linkDraftTitle ?? undefined,
-      text: target ? linkText.trim() || linkHref.trim() : linkText,
+      text: linkText,
     });
     if (!applied) {
-      if (target)
-        target.editor.restoreSelectionSnapshot({
-          anchor: target.selection.head,
-          head: target.selection.head,
-        });
       linkError = t.linkHrefInvalid();
       return;
     }

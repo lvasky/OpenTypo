@@ -625,13 +625,27 @@
   min-width: 0;
 }
 
+.toolbar-group-standard > button:not(:hover):not(.active),
+.toolbar-group-standard > .table-picker-anchor > button:not(:hover):not(.active) {
+  color: color-mix(in srgb, var(--md-editor-fg) 70%, var(--md-editor-muted-fg));
+}
+
+.toolbar-group-extensions {
+  margin-inline-start: auto;
+}
+
+.toolbar-group-extensions .diagram-picker-popover {
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+}
+
 .toolbar-actions-scroll {
   --toolbar-scroll-shadow-left: transparent;
   --toolbar-scroll-shadow-right: transparent;
   display: flex;
   align-items: center;
   gap: 4px;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
   overflow-x: auto;
@@ -983,7 +997,7 @@
 }
 
 .toolbar-spacer {
-  flex: 1;
+  flex: 0 0 auto;
   min-width: 16px;
 }
 

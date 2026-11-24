@@ -7,6 +7,8 @@ import { setTypographyOptions } from '../typography/options';
 import { DEFAULT_TYPOGRAPHY } from '../typography/types';
 import { schema } from './schema';
 import { parseMarkdown } from './markdown';
+import { QUICK_INSERT_CATEGORIES } from './quickInsert';
+import { t } from '../../app/i18n';
 
 beforeEach(() => setTypographyOptions({ ...DEFAULT_TYPOGRAPHY, enabled: false }));
 afterEach(() => {
@@ -75,6 +77,40 @@ describe('inline source editor integration', () => {
       input!.blur();
       expect(target.querySelector(selector)).not.toBeNull();
       expect(editor.flushMarkdown()).toContain(replacement);
+    } finally {
+      destroy();
+    }
+  });
+
+  it.each([
+    ['image', `![${t.quickImageTitle()}](${t.quickImageAddress()})`, '![New image](./pic.png)'],
+    ['link', `[${t.quickLinkName()}](${t.quickLinkAddress()})`, '[New link](./target)'],
+    ['footnote', '[^1]\n\n[^1]:', null],
+  ] as const)('inserts %s from the quick menu at the trigger', async (id, template, updated) => {
+    const { editor, view, target, destroy } = setup('');
+    try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      view.focus();
+      expect(view.someProp('handleTextInput', (handle) =>
+        handle(view, 1, 1, '/', () => view.state.tr.insertText('/')))).toBe(true);
+
+      const categories = QUICK_INSERT_CATEGORIES.map((category) => category.id);
+      expect(categories.filter((category) => ['emoji', 'comment', 'details'].includes(category))).toEqual([]);
+      const options = document.querySelectorAll<HTMLButtonElement>('.quick-insert-menu:not([hidden]) .quick-insert-option');
+      options[categories.indexOf(id)].click();
+      expect(editor.getMarkdown()).toBe(template);
+
+      if (updated) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const input = target.querySelector<HTMLInputElement>('.pm-markdown-source-widget input');
+        expect(document.activeElement).toBe(input);
+        expect(input?.value).toBe(template);
+        input!.value = updated;
+        input!.blur();
+        expect(editor.getMarkdown()).toBe(updated);
+      } else {
+        expect(view.state.selection.$from.parent.type.name).toBe('footnote_def');
+      }
     } finally {
       destroy();
     }

@@ -11,8 +11,8 @@ describe('editorInteractionController viewport layout', () => {
     const editor = createEditorCoreStub();
     const controller = createController({ mode: 'source', strictMarkdown: true, editor,
       sourceTextarea: textarea, sourcePane: undefined, semanticPane: undefined });
-    controller.runCommand({ type: 'insertDetails' });
-    controller.runCommand({ type: 'toggleUnderline' });
+    controller.runCommand({ type: 'insertCommentBlock' });
+    controller.runCommand({ type: 'toggleTableHeader' });
     expect(textarea.value).toBe('<u>manually entered</u>');
     expect(editor.execute).not.toHaveBeenCalled();
   });

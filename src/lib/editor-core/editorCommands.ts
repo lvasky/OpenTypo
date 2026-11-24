@@ -36,7 +36,8 @@ import { MathBlockNodeView } from './nodeViews/MathBlockNodeView';
 import { startMathInlineDraft } from './plugins/mathInlineDraft';
 import { createLinkAttrs } from './link';
 import { t } from '../../app/i18n';
-import type { QuickInsertEditorCommand } from './quickInsert';
+import type { QuickInsertCommand } from './quickInsert';
+import { requestMarkdownSourceEditor } from './plugins/markdownSourceEditor';
 
 /**
  * 在当前块的下方插入一个新的空段落，并将光标移入。
@@ -95,7 +96,6 @@ import {
 } from './tableCommands';
 import { insertCallout, toggleCalloutType, unwrapCallout } from './callout/calloutCommands';
 import { insertDetails, setDetailsDefaultOpen, unwrapDetails } from './details/detailsCommands';
-import { detailsHistoryBoundary, detailsKey } from './details/detailsState';
 import type { EditorCommand, SetMarkdownOptions } from './types';
 import { TOC_PLACEHOLDER_MARKER } from '../toc/tocMarkers';
 import { ensureFrontMatter } from '../markdown/frontMatter';
@@ -608,7 +608,7 @@ export function insertQuickInsertContent(
   view: EditorView,
   from: number,
   to: number,
-  command: QuickInsertEditorCommand,
+  command: QuickInsertCommand,
 ): boolean {
   if (command.type === 'insertMathInline') return startMathInlineDraft(view, { from, to });
   const { state, dispatch } = view;
@@ -618,13 +618,23 @@ export function insertQuickInsertContent(
   const { $from } = prepared.selection;
 
   switch (command.type) {
-    case 'insertDetails':
-      if (!insertDetails(prepared, next => {
-        for (const step of next.steps) tr.step(step);
-        tr.setSelection(TextSelection.create(tr.doc, next.selection.anchor, next.selection.head));
-        tr.setMeta(detailsKey, next.getMeta(detailsKey));
-        tr.setMeta(detailsHistoryBoundary, true);
-      })) return false;
+    case 'insertImageTemplate':
+    case 'insertLinkTemplate': {
+      const image = command.type === 'insertImageTemplate';
+      const label = image ? t.quickImageTitle() : t.quickLinkName();
+      const node = image
+        ? schema.nodes.image.create({ alt: label, src: t.quickImageAddress() })
+        : schema.text(label, [
+            schema.marks.link.create({ href: t.quickLinkAddress() }),
+            schema.marks.inline_source.create(),
+          ]);
+      tr.replaceSelectionWith(node, false);
+      const start = image ? 2 : 1;
+      requestMarkdownSourceEditor(tr, { pos: from, start, end: start + label.length });
+      break;
+    }
+    case 'insertFootnote':
+      if (!appendFootnote(tr)) return false;
       break;
     case 'setHeading':
       if (
@@ -689,18 +699,11 @@ export function insertQuickInsertContent(
       } else if (!appendCommandSteps(state, tr, wrapIn(type, attrs))) return false;
       break;
     }
-    case 'insertCommentInline': {
-      const node = schema.nodes.comment_inline.create({ content: command.content ?? '' });
-      tr.replaceSelectionWith(node, false);
-      tr.setSelection(NodeSelection.create(tr.doc, from));
-      break;
-    }
     case 'insertTable':
     case 'insertCodeBlock':
     case 'insertHorizontalRule':
     case 'insertMathBlock':
-    case 'insertDiagramBlock':
-    case 'insertCommentBlock': {
+    case 'insertDiagramBlock': {
       let node: PmNode;
       switch (command.type) {
         case 'insertTable':
@@ -716,9 +719,6 @@ export function insertQuickInsertContent(
           node = schema.nodes.mermaid_block.create({
             code: getDiagramTemplate(command.diagramType).code,
           });
-          break;
-        case 'insertCommentBlock':
-          node = schema.nodes.comment_block.create({ content: command.content ?? '' });
           break;
         case 'insertHorizontalRule':
           node = schema.nodes.horizontal_rule.create();
@@ -743,8 +743,7 @@ export function insertQuickInsertContent(
       if (command.type === 'insertTable') setSelectionInFirstTableCell(tr, insertedPos);
       else if (
         command.type === 'insertCodeBlock' ||
-        command.type === 'insertMathBlock' ||
-        command.type === 'insertCommentBlock'
+        command.type === 'insertMathBlock'
       )
         tr.setSelection(NodeSelection.create(tr.doc, insertedPos));
       else if (command.type === 'insertDiagramBlock')
@@ -757,8 +756,6 @@ export function insertQuickInsertContent(
       }
     }
   }
-  if (command.type === 'insertCommentInline') CommentInlineNodeView.requestInstantEdit(view);
-  else if (command.type === 'insertCommentBlock') CommentBlockNodeView.requestInstantEdit(view);
   dispatch(closeHistory(tr).scrollIntoView());
   if (command.type === 'insertMathBlock')
     MathBlockNodeView.scheduleEnterEditAt(view, tr.selection.from, 'start');
@@ -1146,25 +1143,28 @@ function insertFrontMatterBlock(markdown: string, setMarkdown: MarkdownSetter): 
 }
 
 function insertTocBlock(view: EditorView): boolean {
-  const node = schema.nodes.toc_block.create({ sourceMarker: TOC_PLACEHOLDER_MARKER });
   const { state } = view;
   const { $from, empty } = state.selection;
+  const node = schema.nodes.toc_block.create({ sourceMarker: TOC_PLACEHOLDER_MARKER });
+  const tr = state.tr;
 
-  if (empty && $from.depth === 1 && $from.parent.isTextblock && $from.parent.content.size === 0) {
-    const blockStart = $from.before(1);
-    const blockEnd = $from.after(1);
-    const tr = state.tr.replaceWith(blockStart, blockEnd, node);
-    tr.setSelection(NodeSelection.create(tr.doc, blockStart));
-    view.dispatch(tr.scrollIntoView());
-    return true;
+  // Keep the directory visible beside its containing block, including when the
+  // caret is inside a list, a table cell, or a nested structure.
+  let pos = $from.pos;
+  if ($from.depth > 0) {
+    const start = $from.before(1);
+    const end = $from.after(1);
+    if (empty && $from.depth === 1 && $from.parent.type === schema.nodes.paragraph && !$from.parent.content.size) {
+      pos = start;
+      tr.replaceWith(start, end, node);
+    } else {
+      pos = $from.pos === start + 1 ? start : end;
+    }
   }
-
-  const tr = state.tr.replaceSelectionWith(node);
-  const nodePos = tr.mapping.map(state.selection.from, -1);
-  if (tr.doc.nodeAt(nodePos)?.type === schema.nodes.toc_block) {
-    tr.setSelection(NodeSelection.create(tr.doc, nodePos));
-  }
-  view.dispatch(tr.scrollIntoView());
+  if (!tr.docChanged) tr.insert(pos, node);
+  if (tr.doc.nodeAt(pos) !== node) return false;
+  tr.setSelection(NodeSelection.create(tr.doc, pos));
+  view.dispatch(closeHistory(tr).scrollIntoView());
   return true;
 }
 
@@ -1383,16 +1383,22 @@ function insertTable(view: EditorView, tableNode: PmNode): boolean {
 }
 
 function insertFootnote(view: EditorView): boolean {
-  const { state } = view;
-  const id = createNextFootnoteId(state.doc);
-  const footnoteRef = schema.nodes.footnote_ref.create({ id });
-  const footnoteDef = schema.nodes.footnote_def.create({ id });
-
-  let tr = state.tr.replaceSelectionWith(footnoteRef, false);
-  const defPos = tr.doc.content.size;
-  tr = tr.insert(defPos, footnoteDef);
-  tr = tr.setSelection(TextSelection.create(tr.doc, defPos + 1));
+  const tr = view.state.tr;
+  if (!appendFootnote(tr)) return false;
   view.dispatch(tr.scrollIntoView());
+  return true;
+}
+
+function appendFootnote(tr: Transaction): boolean {
+  const id = createNextFootnoteId(tr.doc);
+  const ref = schema.nodes.footnote_ref.create({ id });
+  const start = tr.steps.length;
+  tr.replaceSelectionWith(ref, false);
+  if (tr.steps.length === start) return false;
+
+  const defPos = tr.doc.content.size;
+  tr.insert(defPos, schema.nodes.footnote_def.create({ id }));
+  tr.setSelection(TextSelection.create(tr.doc, defPos + 1));
   return true;
 }
 

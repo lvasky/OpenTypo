@@ -1,4 +1,4 @@
-import { requiresHtmlCommand } from '../../lib/editor-core/strictMarkdown';
+import { isBlockedInStrictMarkdown } from '../../lib/editor-core/strictMarkdown';
 import { tick } from 'svelte';
 import type { EditorCommand, EditorCore, EditorMode } from '../../lib/editor-core';
 import type { OutlineItem } from '../../lib/outline/outlineService';
@@ -131,7 +131,7 @@ export function createEditorInteractionController(options: EditorInteractionOpti
   }
 
   function runCommand(command: EditorCommand) {
-    if ((options.getStrictMarkdown?.() ?? true) && requiresHtmlCommand(command)) {
+    if ((options.getStrictMarkdown?.() ?? true) && isBlockedInStrictMarkdown(command)) {
       options.setStatusMessage(t.strictMarkdownDescription());
       return;
     }
