@@ -14,8 +14,7 @@ import {
   isActiveEditComposing,
   commitActiveEdit,
 } from '../nodeViews/activeEditRegistry';
-import { createInlineMathInput, createInlineMathPreview } from '../nodeViews/inlineMathUi';
-import { getMathRenderer } from '../renderers';
+import { createInlineMathInput } from '../nodeViews/inlineMathUi';
 
 interface Draft {
   from: number;
@@ -144,7 +143,7 @@ export function mathInlineDraftPlugin(): Plugin {
         if (!mathInlineDraftKey.getState(view.state) || !view.editable) {
           editor?.destroy();
           editor = null;
-        } else editor?.position();
+        }
       },
       destroy() {
         editor?.destroy();
@@ -158,8 +157,6 @@ export function mathInlineDraftPlugin(): Plugin {
 class DraftEditor {
   readonly dom: HTMLSpanElement;
   private readonly input: HTMLInputElement;
-  private readonly card: HTMLDivElement;
-  private readonly content: HTMLDivElement;
   private readonly win: Window;
   private destroyed = false;
   private composing = false;
@@ -167,7 +164,6 @@ class DraftEditor {
   private deferred: { save: boolean; focus: boolean } | null = null;
   private frame: number | null = null;
   private timer: number | null = null;
-  private renderId = 0;
   private exit = () => this.finish(true, false);
 
   constructor(
@@ -181,15 +177,7 @@ class DraftEditor {
     this.dom.contentEditable = 'false';
     this.input = createInlineMathInput(doc, draft.initial);
     this.input.setAttribute('aria-label', t.insertMathInline());
-    this.dom.append(this.input);
-    const preview = createInlineMathPreview(doc);
-    this.card = preview.card;
-    this.content = preview.content;
-    this.card.style.visibility = 'hidden';
-    this.card.addEventListener('mousedown', (event) => event.preventDefault());
-    doc.body.append(this.card);
-    this.win.addEventListener('scroll', this.position, true);
-    this.win.addEventListener('resize', this.position);
+    this.dom.append('$', this.input, '$');
     this.input.addEventListener('input', this.refresh);
     this.input.addEventListener('blur', () => this.finish(true, false));
     this.input.addEventListener('keydown', (event) => {
@@ -228,8 +216,6 @@ class DraftEditor {
       if (this.destroyed || !view.editable) return;
       this.input.focus({ preventScroll: true });
       this.input.setSelectionRange(this.input.value.length, this.input.value.length);
-      this.position();
-      this.card.style.visibility = '';
     });
     this.refresh();
   }
@@ -273,43 +259,9 @@ class DraftEditor {
     if (focus) this.view.focus();
   }
 
-  position = (): void => {
-    if (this.destroyed) return;
-    const rect = this.input.getBoundingClientRect();
-    this.card.style.display = rect.bottom < 0 || rect.top >= this.win.innerHeight ? 'none' : '';
-    this.card.style.top = `${rect.bottom + 4}px`;
-    this.card.style.left = `${Math.max(8, rect.left)}px`;
-    this.card.style.maxWidth = `${Math.max(100, Math.min(this.win.innerWidth - rect.left - 16, 600))}px`;
-  };
-
   private refresh = (): void => {
-    if (this.destroyed) return;
-    this.input.style.width = `${Math.max(4, this.input.value.length + 1)}ch`;
-    this.position();
-    void this.preview();
+    if (!this.destroyed) this.input.style.width = `${Math.max(4, this.input.value.length + 1)}ch`;
   };
-
-  private async preview(): Promise<void> {
-    const id = ++this.renderId;
-    const tex = this.input.value.trim();
-    if (!tex) {
-      this.content.textContent = '';
-      return;
-    }
-    try {
-      const renderer = getMathRenderer();
-      if (!renderer) {
-        this.content.textContent = 'Math renderer unavailable';
-        return;
-      }
-      const result = await renderer.render(tex, { displayMode: false });
-      if (this.destroyed || id !== this.renderId) return;
-      if (result.error) this.content.textContent = result.error;
-      else this.content.innerHTML = result.html;
-    } catch {
-      if (!this.destroyed && id === this.renderId) this.content.textContent = 'KaTeX error';
-    }
-  }
 
   private resolveWaiters(): void {
     for (const resolve of this.waiters) resolve();
@@ -319,15 +271,11 @@ class DraftEditor {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    this.renderId++;
     this.composing = false;
     this.deferred = null;
     this.resolveWaiters();
     if (this.frame !== null) this.win.cancelAnimationFrame(this.frame);
     if (this.timer !== null) this.win.clearTimeout(this.timer);
     unregisterActiveEdit(this.view, this.exit);
-    this.win.removeEventListener('scroll', this.position, true);
-    this.win.removeEventListener('resize', this.position);
-    this.card.remove();
   }
 }

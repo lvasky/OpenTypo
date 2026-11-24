@@ -3,8 +3,30 @@ import type { EditorCore, EditorMode } from '../../lib/editor-core';
 import type { OutlineItem } from '../../lib/outline/outlineService';
 import type { MarkdownSourceEditorHandle } from '../components/markdownSourceEditor';
 import { createEditorInteractionController } from './editorInteractionController';
+import { createEditorCore } from '../../lib/editor-core';
 
 describe('editorInteractionController viewport layout', () => {
+  it('renders a TOC immediately when inserted from the source side of a split view', () => {
+    const target = document.body.appendChild(document.createElement('div'));
+    const markdown = '# Heading';
+    const editor = createEditorCore({ markdown, target });
+    const sourceTextarea = createTextarea({ scrollHeight: 100, clientHeight: 100 });
+    sourceTextarea.value = markdown;
+    sourceTextarea.setSelectionRange(markdown.length, markdown.length);
+    const controller = createController({
+      editor, mode: 'source', split: true, sourceTextarea, sourcePane: undefined, semanticPane: undefined,
+      onSourceChange: (value) => editor.setMarkdown(value, { sourceInput: true, reason: 'source-input' }),
+    });
+    try {
+      controller.runCommand({ type: 'insertToc' });
+      expect(sourceTextarea.value).toBe('# Heading\n\n[TOC]');
+      expect(target.querySelector('.toc-link .toc-text')?.textContent).toBe('Heading');
+    } finally {
+      editor.destroy();
+      target.remove();
+    }
+  });
+
   it('blocks generated HTML in source mode while leaving manually entered HTML alone', () => {
     const textarea = createTextarea({ scrollHeight: 100, clientHeight: 100 });
     textarea.value = '<u>manually entered</u>';
@@ -311,6 +333,8 @@ describe('editorInteractionController viewport layout', () => {
 
 function createController(options: {
   strictMarkdown?: boolean;
+  split?: boolean;
+  onSourceChange?: (value: string) => void;
   mode: EditorMode | { value: EditorMode };
   sourcePane: HTMLElement | undefined;
   semanticPane: HTMLElement | undefined;
@@ -326,10 +350,11 @@ function createController(options: {
     getEditor: () => options.editor ?? createEditorCoreStub(),
     getLargeDocumentMode: () => false,
     getMode: () => (typeof options.mode === 'string' ? options.mode : options.mode.value),
+    getSplitView: () => options.split ?? false,
     getOutline: () => options.outline ?? [],
     getSemanticPane: () => options.semanticPane,
     getSourcePane: () => options.sourcePane,
-    getSourceEditor: () => createSourceEditorStub(options.sourceTextarea),
+    getSourceEditor: () => createSourceEditorStub(options.sourceTextarea, options.onSourceChange),
     getPendingSourceScrollTop: () => pendingSourceScrollTop.value,
     setPendingSourceScrollTop: (value) => {
       pendingSourceScrollTop.value = value;
@@ -342,6 +367,7 @@ function createController(options: {
 
 function createSourceEditorStub(
   textarea: HTMLTextAreaElement | undefined,
+  onChange?: (value: string) => void,
 ): MarkdownSourceEditorHandle | undefined {
   if (!textarea) return undefined;
   return {
@@ -349,6 +375,7 @@ function createSourceEditorStub(
     placeCaretAtCoordinates: () => false,
     setMarkdown: (value) => {
       textarea.value = value;
+      onChange?.(value);
     },
     getSelection: () => ({ from: textarea.selectionStart, to: textarea.selectionEnd }),
     replaceRange: (from, to, text) => { textarea.setRangeText(text, from, to, 'end'); return true; },

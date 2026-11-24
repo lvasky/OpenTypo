@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createEditorCore } from '../../lib/editor-core/createEditorCore';
 import { DEFAULT_IMAGE_HANDLING_SETTINGS } from '../../lib/services/render';
 import { createImageInsertionHandlers } from './imageInsertion';
+import { readEditorClipboard } from './clipboard';
 
 const { importImage, resolveImage, invoke, readImage } = vi.hoisted(() => ({
   importImage: vi.fn(async () => ({ markdownSrc: './assets/photo.png' })),
@@ -114,7 +115,10 @@ it.each([true, false])(
   },
 );
 
-it.each(['native-list', 'untyped-file', 'web-bitmap', 'native-bitmap'])(
+it.each([
+  'native-list', 'untyped-file', 'web-bitmap', 'clipboard-item', 'native-bitmap',
+  'native-list-keyboard', 'native-bitmap-keyboard',
+])(
   'pastes clipboard %s at the native caret and renders the imported image immediately',
   async (representation) => {
     const host = document.body.appendChild(document.createElement('div'));
@@ -141,15 +145,15 @@ it.each(['native-list', 'untyped-file', 'web-bitmap', 'native-bitmap'])(
       if (command === 'read_editor_clipboard_text') {
         return {
           html: '', text: '',
-          image_paths: representation === 'native-list' ? ['C:\\Pictures\\photo.png'] : [],
+          image_paths: representation.startsWith('native-list') ? ['C:\\Pictures\\photo.png'] : [],
         };
       }
       if (command === 'read_file_as_base64') return { data_url: 'data:image/png;base64,AQID' };
       throw new Error(command);
     });
 
-    const usesNativeBitmap = representation === 'native-bitmap';
-    const capture = representation === 'web-bitmap' || usesNativeBitmap;
+    const usesNativeBitmap = representation.startsWith('native-bitmap');
+    const capture = representation === 'web-bitmap' || representation === 'clipboard-item' || usesNativeBitmap;
     const file = {
       name: capture ? 'clipboard.png' : 'photo.png',
       type: capture ? 'image/png' : '',
@@ -175,6 +179,7 @@ it.each(['native-list', 'untyped-file', 'web-bitmap', 'native-bitmap'])(
       value: {
         types: ['Files'],
         files: representation === 'untyped-file' || representation === 'web-bitmap' ? [file] : [],
+        items: representation === 'clipboard-item' ? [{ kind: 'file', getAsFile: () => file }] : [],
         getData: () => '',
       },
     });
@@ -186,8 +191,15 @@ it.each(['native-list', 'untyped-file', 'web-bitmap', 'native-bitmap'])(
       const caretNode = text.nextNode()!;
       expect(caretNode.textContent).toBe('Before after');
       document.getSelection()!.collapse(caretNode, 'Before '.length);
-      host.querySelector('.ProseMirror')!.dispatchEvent(event);
-      await handlers.awaitPendingInsertions();
+      if (representation.endsWith('-keyboard')) {
+        const target = editor.captureImagePasteTarget!();
+        const clipboard = await readEditorClipboard(true);
+        expect(clipboard.kind).toBe('image');
+        if (clipboard.kind === 'image') await handlers.insertImageFiles(clipboard.files, target);
+      } else {
+        host.querySelector('.ProseMirror')!.dispatchEvent(event);
+        await handlers.awaitPendingInsertions();
+      }
 
       expect(editor.getMarkdown()).toBe(`First paragraph\n\nBefore ![${file.name}](./assets/photo.png)after`);
       expect(importImage).toHaveBeenLastCalledWith(
@@ -199,7 +211,7 @@ it.each(['native-list', 'untyped-file', 'web-bitmap', 'native-bitmap'])(
       expect(image?.getAttribute('src')).toBe('https://asset.localhost/photo.png');
       expect(readImage).toHaveBeenCalledTimes(usesNativeBitmap ? 1 : 0);
       if (usesNativeBitmap) expect(close).toHaveBeenCalledOnce();
-      if (representation === 'native-list') {
+      if (representation.startsWith('native-list')) {
         expect(invoke).toHaveBeenCalledWith('read_file_as_base64', { input: { path: 'C:\\Pictures\\photo.png' } });
       }
     } finally {

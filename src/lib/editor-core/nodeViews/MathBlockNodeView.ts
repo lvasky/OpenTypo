@@ -181,7 +181,10 @@ export class MathBlockNodeView {
     this.textarea.value = this.originalTex;
     this.textarea.rows = Math.max(2, this.originalTex.split('\n').length);
     this.textarea.spellcheck = false;
-    this.dom.appendChild(this.textarea);
+    const openingFence = document.createElement('div');
+    openingFence.className = 'math-block-source-fence';
+    openingFence.textContent = '$$';
+    this.dom.append(openingFence, this.textarea, openingFence.cloneNode(true));
 
     const textarea = this.textarea;
     textarea.addEventListener('input', () => {

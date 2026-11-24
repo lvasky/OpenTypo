@@ -8,6 +8,7 @@ import { t } from '../i18n';
 import { createImageMarkdown, getImageFiles, type ImageImportFile } from './imageMarkdown';
 import { containsClipboardTable, readNativeClipboardBitmap, readNativeClipboardPaste } from './clipboard';
 import {
+  getClipboardImageFiles,
   getDelegatedImagePaste,
   mightHaveNativeImageFiles,
   type ImageInsertionTarget,
@@ -37,6 +38,7 @@ export function createImageInsertionHandlers(options: ImageInsertionOptions) {
   const pendingInsertions = new Set<Promise<void>>();
 
   function captureTarget(editor: EditorCore): ImageInsertionTarget | undefined {
+    if (editor.captureImagePasteTarget) return editor.captureImagePasteTarget();
     const snapshot = editor.getSnapshot();
     if (!snapshot.selection) return undefined;
     return {
@@ -91,7 +93,7 @@ export function createImageInsertionHandlers(options: ImageInsertionOptions) {
     const delegated = getDelegatedImagePaste(event);
     if (event.defaultPrevented && !delegated) return;
     const clipboard = event.clipboardData;
-    const files = getImageFiles(clipboard?.files);
+    const files = getClipboardImageFiles(clipboard);
     const checkNative = options.getDesktopEnabled?.() && mode === 'semantic' &&
       clipboard && mightHaveNativeImageFiles(clipboard);
     if (!files.length && !checkNative) return;

@@ -3609,18 +3609,23 @@
     const sourceTabId = activeTabId;
     const core = editor;
     const runtime = documentRuntimes.get(sourceTabId);
-    const revision = core.getSnapshot().version;
+    const pasteTarget = getActiveEditorMode() === 'semantic' ? core.captureImagePasteTarget?.() : undefined;
+    const before = core.getSnapshot();
+    const revision = pasteTarget?.contentRevision ?? before.contentRevision ?? before.version;
     return trackEditorOperation(async () => {
       try {
         const content = await readEditorClipboard(desktopEnabled, mode === 'plain' ? 'text' : 'rich');
-        if (!runtime || runtime.disposed || documentRuntimes.get(sourceTabId) !== runtime || core.getSnapshot().version !== revision) return;
+        if (!runtime || runtime.disposed || documentRuntimes.get(sourceTabId) !== runtime) return;
+        const current = core.getSnapshot();
+        if ((current.contentRevision ?? current.version) !== revision) return;
         if (content.kind === 'image') {
-          await runtime.images.insertImageFiles(content.files);
+          await runtime.images.insertImageFiles(content.files, pasteTarget);
         } else {
           const input =
             content.kind === 'html'
               ? { html: content.html, text: content.text }
               : { text: content.text };
+          if (pasteTarget) core.restoreSelectionSnapshot(pasteTarget.selection);
           const result = core.pasteClipboard(input, { mode });
           if (result.status === 'rejected' && result.reason === 'no-text') {
             statusMessage = t.clipboardHasNoText();
@@ -7647,6 +7652,15 @@
       return;
     }
     handleGlobalAppShortcut(event, commandHandlers, shortcutPreferences);
+    if (!event.defaultPrevented && event.ctrlKey && !event.shiftKey && !event.altKey &&
+        !event.isComposing && event.key.toLowerCase() === 'v' &&
+        desktopEnabled && getPlatformCapabilities().isWindows && getActiveEditorMode() === 'semantic' &&
+        event.target instanceof HTMLElement &&
+        event.target.closest('.ProseMirror[contenteditable="true"]') &&
+        !event.target.closest('input, textarea, [contenteditable="false"]')) {
+      event.preventDefault();
+      void pasteFromContextMenu();
+    }
   }
 
   // 使用 capture 阶段在事件到达可滚动元素之前拦截，

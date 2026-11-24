@@ -33,7 +33,14 @@ describe('ImageNodeView', () => {
 
     button?.click();
     expect(document.body.querySelector('.image-fullscreen-overlay')).not.toBeNull();
-    expect(document.body.querySelector('.image-fullscreen-zoom-badge')?.textContent).toBe('100%');
+    const badge = document.body.querySelector('.image-fullscreen-zoom-badge')!;
+    expect(badge.textContent).toBe('100%');
+    const wheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -60 });
+    badge.dispatchEvent(wheel);
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(badge.textContent).toBe('110%');
+    badge.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 60 }));
+    expect(badge.textContent).toBe('100%');
 
     document.body.querySelector<HTMLButtonElement>('.image-fullscreen-close-button')?.click();
     expect(document.body.querySelector('.image-fullscreen-overlay')).toBeNull();

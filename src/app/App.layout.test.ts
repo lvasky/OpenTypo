@@ -526,10 +526,9 @@ describe('App outline layout', () => {
     expect(appSource).toContain('updateLinkText');
   });
 
-  it('wires Markdown comments through toolbar, titlebar and native menu', () => {
-    expect(toolbarSource).toContain('MessageSquare');
-    expect(toolbarSource).toContain("type: 'insertCommentInline'");
-    expect(toolbarSource).toContain('aria-label={t.insertInlineComment()}');
+  it('keeps Markdown comments in the titlebar and native menu', () => {
+    expect(toolbarSource).not.toContain("type: 'insertCommentInline'");
+    expect(toolbarSource).not.toContain("type: 'insertDetails'");
     expect(titleBarSource).toContain("type: 'insertCommentInline'");
     expect(titleBarSource).toContain("type: 'insertCommentBlock'");
     expect(titleBarSource).not.toContain("comingSoon('注释'");

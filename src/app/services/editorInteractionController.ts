@@ -162,13 +162,19 @@ export function createEditorInteractionController(options: EditorInteractionOpti
       else sourceEditor?.redo();
       return;
     }
-    if (command.type === 'insertToc' && options.getMode() === 'source') {
-      insertTocAtSourceSelection();
-      return;
+    const editor = options.getEditor();
+    if (command.type === 'insertToc') {
+      if (options.getMode() === 'source') {
+        insertTocAtSourceSelection();
+        return;
+      }
+      // In split mode the semantic tree may still be waiting for a source edit.
+      editor.commitPendingEdits(true);
+      editor.refreshSemanticView();
     }
 
-    options.getEditor().execute(command);
-    options.getEditor().focus();
+    editor.execute(command);
+    editor.focus();
   }
 
   function insertTocAtSourceSelection() {
@@ -186,6 +192,7 @@ export function createEditorInteractionController(options: EditorInteractionOpti
     const nextSelection = prefix.length + before.length + tocBlock.length;
 
     sourceEditor?.setMarkdown(nextMarkdown, { addToHistory: true });
+    if (options.getSplitView?.()) options.getEditor().refreshSemanticView();
     requestAnimationFrame(() => {
       if (!sourceEditor) {
         return;

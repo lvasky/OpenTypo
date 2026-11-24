@@ -1,9 +1,7 @@
 import type { Mark, Node as ProseMirrorNode } from 'prosemirror-model';
 import { Plugin } from 'prosemirror-state';
 import { schema } from '../schema';
-import { MathInlineNodeView } from '../nodeViews/MathInlineNodeView';
 import { isPlainTextPaste } from '../clipboardMarkdown';
-import type { EditorView } from 'prosemirror-view';
 import { analyzeInlineSource, isInlineSourceBlock } from '../InlineSourceCodec';
 
 interface InlineMathMatch {
@@ -11,10 +9,9 @@ interface InlineMathMatch {
   to: number;
   tex: string;
   marks?: readonly Mark[];
-  isNew?: boolean; // 标记是否是新创建的行公式
 }
 
-export function mathInlineInputPlugin(getView?: () => EditorView | null): Plugin {
+export function mathInlineInputPlugin(): Plugin {
   return new Plugin({
     appendTransaction(transactions, _oldState, newState) {
       if (isPlainTextPaste(transactions)) return null;
@@ -28,7 +25,6 @@ export function mathInlineInputPlugin(getView?: () => EditorView | null): Plugin
       }
 
       const tr = newState.tr;
-      let newMatchPos: number | null = null;
 
       for (const match of matches.reverse()) {
         tr.replaceWith(
@@ -36,15 +32,6 @@ export function mathInlineInputPlugin(getView?: () => EditorView | null): Plugin
           match.to,
           schema.nodes.math_inline.create({ tex: match.tex }, null, match.marks),
         );
-        if (match.isNew) {
-          newMatchPos = match.from;
-        }
-      }
-
-      // 如果有新创建的行公式，触发立即编辑
-      if (newMatchPos !== null) {
-        // 请求立即进入编辑态
-        MathInlineNodeView.requestInstantEdit(getView?.() ?? undefined);
       }
 
       return tr;
@@ -109,7 +96,6 @@ function scanTextForInlineMath(text: string, absoluteTextPos: number): InlineMat
         from: absoluteTextPos + start,
         to: absoluteTextPos + end + 1,
         tex: tex.trim(),
-        isNew: true, // 标记为新创建的行公式
       });
     }
 

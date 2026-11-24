@@ -73,6 +73,12 @@ export async function readEditorClipboard(
   if (preference === 'rich' && native) {
     const preferred = nativeClipboardPaste(native);
     if (preferred) return preferred;
+    // The native clipboard remains usable when WebView2 exposes no paste event
+    // or omits its bitmap. CF_HTML also preserves ordinary styled text.
+    if (native.html) return { kind: 'html', html: native.html, text: native.text };
+    if (native.text) return { kind: 'text', text: native.text };
+    const image = await readNativeClipboardBitmap();
+    if (image) return image;
   }
   const webResult = await tryReadWebClipboard(preference);
   if (webResult) return webResult;

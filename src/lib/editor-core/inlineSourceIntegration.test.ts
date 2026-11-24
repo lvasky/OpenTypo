@@ -57,6 +57,7 @@ describe('inline source editor integration', () => {
     ['![image](./a.png)', 'image', '![image](./b.png)', '.image-node'],
     ['note [^1]', 'footnote_ref', '[^2]', '.footnote-ref[data-footnote-id="2"]'],
     ['[^1]: definition', 'footnote_def', '[^2]:', '.footnote-def[data-footnote-id="2"]'],
+    ['before $x$ after', 'math_inline', '$x^2$', '.math-inline[data-tex="x^2"]'],
   ])('reveals and edits the source for %s at the caret', async (source, targetText, replacement, selector) => {
     const { editor, view, target, destroy } = setup(source);
     try {
@@ -69,12 +70,15 @@ describe('inline source editor integration', () => {
         }
       });
       view.focus();
-      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)));
+      expect(view.someProp('handleClick', (handler) => handler(view, pos, new MouseEvent('click')))).toBe(true);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const input = target.querySelector<HTMLInputElement>('.pm-markdown-source-widget input');
-      expect(input).not.toBeNull();
-      input!.focus();
+      expect(document.activeElement).toBe(input);
+      expect(input?.closest('.ProseMirror')).toBe(view.dom);
+      if (targetText !== 'footnote_def') expect(target.querySelector('.pm-markdown-source-hidden')).not.toBeNull();
       input!.value = replacement;
       input!.blur();
+      expect(target.querySelector('.pm-markdown-source-widget')).toBeNull();
       expect(target.querySelector(selector)).not.toBeNull();
       expect(editor.flushMarkdown()).toContain(replacement);
     } finally {

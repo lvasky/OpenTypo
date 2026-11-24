@@ -22,6 +22,15 @@ export function isImageFile(file: File): boolean {
       /\.(?:png|jpe?g|gif|webp|bmp|svg|avif)$/i.test(file.name));
 }
 
+export function getClipboardImageFiles(clipboard: DataTransfer | null | undefined): File[] {
+  const files = Array.from(clipboard?.files ?? []).filter(isImageFile);
+  if (files.length) return files;
+  return Array.from(clipboard?.items ?? []).flatMap((item) => {
+    const file = item.kind === 'file' ? item.getAsFile() : null;
+    return file && isImageFile(file) ? [file] : [];
+  });
+}
+
 /** A WebView can omit the clipboard File objects for Explorer's native file list. */
 export function mightHaveNativeImageFiles(clipboard: DataTransfer): boolean {
   const html = clipboard.getData('text/html');

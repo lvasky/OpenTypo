@@ -4,7 +4,7 @@ import { tableSourcePlugin } from './tableSource';
 import { createTableClipboardPayload } from './tableActions';
 import {
   delegateImagePaste,
-  isImageFile,
+  getClipboardImageFiles,
   mightHaveNativeImageFiles,
   type ImageInsertionTarget,
 } from './imagePasteEvents';
@@ -80,7 +80,7 @@ import { codeBlockNavigationPlugin } from './plugins/codeBlockNavigation';
 import { displayMathInputPlugin } from './plugins/displayMathInput';
 import { mathInlineInputPlugin } from './plugins/mathInlineInput';
 import { mathInlineDraftPlugin, mathInlineDraftKey, canInsertMathInline, cancelMathInlineDraft } from './plugins/mathInlineDraft';
-import { markdownSourceEditorPlugin } from './plugins/markdownSourceEditor';
+import { markdownSourceEditorPlugin, openMarkdownSourceAt } from './plugins/markdownSourceEditor';
 import { linkInteractionPlugin } from './plugins/linkInteraction';
 import {
   inlineSourceEditingPlugin,
@@ -342,8 +342,7 @@ export class ProseMirrorEditorCore implements EditorCore {
           new CommentInlineNodeView(node, view, getPos as () => number, this.isRestoringNodeSelection(getPos)),
         footnote_ref: (node, view) => new FootnoteRefNodeView(node, view),
         footnote_def: (node, view) => new FootnoteDefNodeView(node, view),
-        math_inline: (node, view, getPos) =>
-          new MathInlineNodeView(node, view, getPos as () => number, this.isRestoringNodeSelection(getPos)),
+        math_inline: (node) => new MathInlineNodeView(node),
         math_block: (node, view, getPos) =>
           new MathBlockNodeView(node, view, getPos as () => number, this.isRestoringNodeSelection(getPos)),
         mermaid_block: (node, view, getPos) =>
@@ -876,6 +875,7 @@ export class ProseMirrorEditorCore implements EditorCore {
     const resolved = doc.resolve(Math.max(0, Math.min(doc.content.size, position)));
     const selection = Selection.findFrom(resolved, bias, true) ?? Selection.findFrom(resolved, -bias, true);
     if (!selection) return false;
+    if (openMarkdownSourceAt(view, selection.from)) return true;
     view.dispatch(view.state.tr.setSelection(selection).setMeta('addToHistory', false));
     return true;
   }
@@ -1104,7 +1104,7 @@ export class ProseMirrorEditorCore implements EditorCore {
     const plain = clipboard ? this.consumePlainTextPasteRequest() : false;
     if (!plain && clipboard) {
       const files = Array.from(clipboard.files ?? []);
-      const hasImages = files.some(isImageFile);
+      const hasImages = getClipboardImageFiles(clipboard).length > 0;
       const couldHaveNativeFiles = mightHaveNativeImageFiles(clipboard);
       if ((hasImages || couldHaveNativeFiles) && !this.isTableClipboardSlice(slice) &&
           !/<table[\s>]/i.test(clipboard.getData('text/html'))) {
@@ -1193,14 +1193,14 @@ export class ProseMirrorEditorCore implements EditorCore {
     return result.status === 'inserted' || result.reason === 'no-text';
   }
 
-  private captureImagePasteTarget(): ImageInsertionTarget {
-    this.commitPendingEdits();
-    const view = this.view!;
-    const selection = view.state.selection;
-    let { anchor, head } = selection;
-    const native = view.dom.ownerDocument.getSelection();
+  captureImagePasteTarget(): ImageInsertionTarget {
+    this.commitPendingEdits(true);
+    const view = this.view;
+    const selection = view?.state.selection ?? this.suspendedState?.selection;
+    let { anchor, head } = selection ?? { anchor: 0, head: 0 };
+    const native = view?.dom.ownerDocument.getSelection();
     // Selectionchange may still be queued when Ctrl+V reaches the editor.
-    if (selection instanceof TextSelection && native?.anchorNode && native.focusNode &&
+    if (view && selection instanceof TextSelection && native?.anchorNode && native.focusNode &&
         view.dom.contains(native.anchorNode) && view.dom.contains(native.focusNode)) {
       try {
         const nativeAnchor = view.posAtDOM(native.anchorNode, native.anchorOffset);
@@ -1696,7 +1696,7 @@ export class ProseMirrorEditorCore implements EditorCore {
         blockquoteInputPlugin(),
         history(),
         taskListPlugin(),
-        mathInlineInputPlugin(() => this.view),
+        mathInlineInputPlugin(),
         mathInlineDraftPlugin(),
         inlineSourceEditingPlugin({ readonly: () => !this.isEditable() }),
         markdownSourceEditorPlugin(),
@@ -1892,13 +1892,6 @@ export class ProseMirrorEditorCore implements EditorCore {
             const { $from, empty } = state.selection;
             if (!empty) return false;
             const nodeAfter = $from.nodeAfter;
-            if (nodeAfter?.type.name === 'math_inline') {
-              if (dispatch) {
-                MathInlineNodeView.requestKeyboardEntry('start', this.view ?? undefined);
-                dispatch(state.tr.setSelection(NodeSelection.create(state.doc, $from.pos)));
-              }
-              return true;
-            }
             if (nodeAfter?.type.name === 'comment_inline') {
               if (dispatch) {
                 CommentInlineNodeView.requestKeyboardEntry('start', this.view ?? undefined);
@@ -1912,17 +1905,6 @@ export class ProseMirrorEditorCore implements EditorCore {
             const { $from, empty } = state.selection;
             if (!empty) return false;
             const nodeBefore = $from.nodeBefore;
-            if (nodeBefore?.type.name === 'math_inline') {
-              if (dispatch) {
-                MathInlineNodeView.requestKeyboardEntry('end', this.view ?? undefined);
-                dispatch(
-                  state.tr.setSelection(
-                    NodeSelection.create(state.doc, $from.pos - nodeBefore.nodeSize),
-                  ),
-                );
-              }
-              return true;
-            }
             if (nodeBefore?.type.name === 'comment_inline') {
               if (dispatch) {
                 CommentInlineNodeView.requestKeyboardEntry('end', this.view ?? undefined);

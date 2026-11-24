@@ -755,14 +755,29 @@ export class ImageNodeView {
     zoomSurfaceEl.className = 'image-fullscreen-zoom-surface';
     const fullscreenImg = img.cloneNode(false) as HTMLImageElement;
     fullscreenImg.removeAttribute('loading');
+    fullscreenImg.style.removeProperty('width');
+    fullscreenImg.style.removeProperty('height');
     zoomSurfaceEl.appendChild(fullscreenImg);
 
     const zoomBadgeEl = document.createElement('div');
     zoomBadgeEl.className = 'image-fullscreen-zoom-badge';
 
     viewportEl.appendChild(zoomSurfaceEl);
-    viewportEl.addEventListener('wheel', (event) => this.handleFullscreenWheel(event), {
+    overlayEl.addEventListener('wheel', (event) => this.handleFullscreenWheel(event), {
+      capture: true,
       passive: false,
+    });
+    let gestureScale = 1;
+    overlayEl.addEventListener('gesturestart', (event) => {
+      event.preventDefault();
+      gestureScale = this.fullscreenScale;
+    });
+    overlayEl.addEventListener('gesturechange', (event) => {
+      event.preventDefault();
+      const gesture = event as MouseEvent & { scale: number };
+      if (Number.isFinite(gesture.scale)) {
+        this.zoomFullscreenAt(gestureScale * gesture.scale, gesture.clientX, gesture.clientY);
+      }
     });
     viewportEl.addEventListener('pointerdown', (event) => this.handleFullscreenPointerDown(event));
     viewportEl.addEventListener('pointermove', (event) => this.handleFullscreenPointerMove(event));
@@ -813,29 +828,31 @@ export class ImageNodeView {
   }
 
   private handleFullscreenWheel(event: WheelEvent): void {
-    if (!event.ctrlKey) return;
+    if (!event.deltaY) return;
     event.preventDefault();
+    event.stopPropagation();
+    const step = event.deltaMode === WheelEvent.DOM_DELTA_PIXEL
+      ? Math.min(0.2, Math.abs(event.deltaY) / 600)
+      : ImageNodeView.FULLSCREEN_SCALE_STEP;
+    const scale = this.fullscreenScale - Math.sign(event.deltaY) * step;
+    this.zoomFullscreenAt(scale, event.clientX, event.clientY);
+  }
 
-    const viewportEl = this.fullscreenViewportEl;
-    if (!viewportEl) return;
+  private zoomFullscreenAt(scale: number, clientX: number, clientY: number): void {
+    const viewport = this.fullscreenViewportEl;
+    const surface = this.fullscreenZoomSurfaceEl;
+    if (!viewport || !surface) return;
+    const next = this.clampFullscreenScale(scale);
+    if (next === this.fullscreenScale) return;
+    const before = surface.getBoundingClientRect();
+    const x = Number.isFinite(clientX) ? clientX : before.left + before.width / 2;
+    const y = Number.isFinite(clientY) ? clientY : before.top + before.height / 2;
+    const scaleRatio = next / this.fullscreenScale;
 
-    const oldScale = this.fullscreenScale;
-    const direction = event.deltaY < 0 ? 1 : -1;
-    const nextScale = this.clampFullscreenScale(
-      oldScale + direction * ImageNodeView.FULLSCREEN_SCALE_STEP,
-    );
-    if (nextScale === oldScale) return;
-
-    const viewportRect = viewportEl.getBoundingClientRect();
-    const pointerX = event.clientX - viewportRect.left;
-    const pointerY = event.clientY - viewportRect.top;
-    const contentX = viewportEl.scrollLeft + pointerX;
-    const contentY = viewportEl.scrollTop + pointerY;
-    const scaleRatio = nextScale / oldScale;
-
-    this.setFullscreenScale(nextScale);
-    viewportEl.scrollLeft = contentX * scaleRatio - pointerX;
-    viewportEl.scrollTop = contentY * scaleRatio - pointerY;
+    this.setFullscreenScale(next);
+    const after = surface.getBoundingClientRect();
+    viewport.scrollLeft += after.left + (x - before.left) * scaleRatio - x;
+    viewport.scrollTop += after.top + (y - before.top) * scaleRatio - y;
   }
 
   private handleFullscreenPointerDown(event: PointerEvent): void {
@@ -889,7 +906,7 @@ export class ImageNodeView {
   private setFullscreenScale(scale: number): void {
     this.fullscreenScale = this.clampFullscreenScale(scale);
     const roundedScale = Number(this.fullscreenScale.toFixed(2));
-    this.fullscreenZoomSurfaceEl?.style.setProperty('--image-fullscreen-scale', `${roundedScale}`);
+    this.fullscreenZoomSurfaceEl?.style.setProperty('--image-fullscreen-scale', String(this.fullscreenScale));
     if (this.fullscreenZoomBadgeEl) {
       this.fullscreenZoomBadgeEl.textContent = `${Math.round(roundedScale * 100)}%`;
     }

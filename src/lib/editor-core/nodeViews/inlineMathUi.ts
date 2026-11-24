@@ -7,17 +7,3 @@ export function createInlineMathInput(doc: Document, value: string): HTMLInputEl
   input.value = value;
   return input;
 }
-
-export function createInlineMathPreview(doc: Document): {
-  card: HTMLDivElement;
-  content: HTMLDivElement;
-} {
-  const card = doc.createElement('div');
-  card.className = 'math-inline-preview';
-  card.style.position = 'fixed';
-  card.style.zIndex = '1000';
-  const content = doc.createElement('div');
-  content.className = 'math-inline-preview-content';
-  card.append(content);
-  return { card, content };
-}

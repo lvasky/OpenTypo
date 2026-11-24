@@ -6,7 +6,6 @@
     Braces,
     CheckSquare,
     ChevronUp,
-    PanelTopClose,
     Code2,
     CodeXml,
     Columns2,
@@ -16,7 +15,6 @@
     Link,
     List,
     ListTree,
-    MessageSquare,
     Info,
     Quote,
     ScanLine,
@@ -367,6 +365,68 @@
       >
         <TableOfContents size={17} />
       </button>
+      <button
+        title={t.callout()}
+        aria-label={t.insertCallout()}
+        on:mousedown|preventDefault
+        on:click={() => runCommand({ type: 'insertCallout' })}
+      >
+        <Info size={17} />
+      </button>
+      <div class="diagram-picker-anchor" use:clickOutside={() => mathPickerOpen = false}>
+        <button title={t.mathFormula()} aria-label={t.insertMathFormula()} aria-haspopup="menu"
+          aria-expanded={mathPickerOpen} class:active={mathPickerOpen} on:mousedown|preventDefault
+          on:click|stopPropagation={toggleMathPicker}>
+          <Sigma size={17} />
+        </button>
+        {#if mathPickerOpen}
+          <div class="diagram-picker-popover" role="menu" aria-label={t.insertMathFormula()} tabindex="-1"
+            on:keydown={(event) => { if (event.key === 'Escape') { event.preventDefault(); mathPickerOpen = false; } }}>
+            <button type="button" role="menuitem" disabled={mathInlineInsertionDisabled || mode === 'source'}
+              on:mousedown|preventDefault on:click={() => insertMath({ type: 'insertMathInline' })}>
+              <span>{t.mathInline()}</span><small>$…$</small>
+            </button>
+            <button type="button" role="menuitem" on:mousedown|preventDefault
+              on:click={() => insertMath({ type: 'insertMathBlock', tex: 'E = mc^2' })}>
+              <span>{t.mathBlock()}</span><small>$$…$$</small>
+            </button>
+          </div>
+        {/if}
+      </div>
+      <div class="diagram-picker-anchor" use:clickOutside={closeDiagramPicker}>
+        <button
+          title={t.diagram()}
+          aria-haspopup="menu"
+          aria-expanded={diagramPickerOpen}
+          aria-label={t.insertDiagram()}
+          class:active={diagramPickerOpen}
+          on:click|stopPropagation={toggleDiagramPicker}
+        >
+          <Braces size={17} />
+        </button>
+        {#if diagramPickerOpen}
+          <div
+            class="diagram-picker-popover"
+            role="menu"
+            aria-label={t.insertDiagram()}
+            tabindex="-1"
+            on:keydown={handleDiagramPickerKeydown}
+          >
+            <div class="diagram-picker-header">{t.diagram()}</div>
+            <button type="button" role="menuitem" on:click={insertBlankDiagram}>
+              <span>{t.blankDiagram()}</span>
+              <small>mermaid</small>
+            </button>
+            <div class="diagram-picker-header">{t.template()}</div>
+            {#each DIAGRAM_TEMPLATES as template}
+              <button type="button" role="menuitem" on:click={() => insertDiagram(template.type)}>
+                <span>{getDiagramTypeLabel(template.type)}</span>
+                <small>{template.type}</small>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
     </div>
     <div class="toolbar-group toolbar-group-extensions">
       <span class="divider" aria-hidden="true"></span>
@@ -406,80 +466,6 @@
       >
         <Superscript size={17} />
       </button>
-      <button
-        title={t.nonstandardMarkdownTooltip({ label: t.inlineComment() })}
-        aria-label={t.insertInlineComment()}
-        on:mousedown|preventDefault
-        on:click={() => runCommand({ type: 'insertCommentInline' })}
-      >
-        <MessageSquare size={17} />
-      </button>
-      <button title={t.nonstandardMarkdownTooltip({ label: t.details() })} aria-label={t.insertDetails()} on:mousedown|preventDefault
-        on:click={() => runCommand({ type: 'insertDetails' })}>
-        <PanelTopClose size={17} />
-      </button>
-      <button
-        title={t.nonstandardMarkdownTooltip({ label: t.callout() })}
-        aria-label={t.insertCallout()}
-        on:mousedown|preventDefault
-        on:click={() => runCommand({ type: 'insertCallout' })}
-      >
-        <Info size={17} />
-      </button>
-      <div class="diagram-picker-anchor" use:clickOutside={() => mathPickerOpen = false}>
-        <button title={t.nonstandardMarkdownTooltip({ label: t.mathFormula() })} aria-label={t.insertMathFormula()} aria-haspopup="menu"
-          aria-expanded={mathPickerOpen} class:active={mathPickerOpen} on:mousedown|preventDefault
-          on:click|stopPropagation={toggleMathPicker}>
-          <Sigma size={17} />
-        </button>
-        {#if mathPickerOpen}
-          <div class="diagram-picker-popover" role="menu" aria-label={t.insertMathFormula()} tabindex="-1"
-            on:keydown={(event) => { if (event.key === 'Escape') { event.preventDefault(); mathPickerOpen = false; } }}>
-            <button type="button" role="menuitem" disabled={mathInlineInsertionDisabled || mode === 'source'}
-              on:mousedown|preventDefault on:click={() => insertMath({ type: 'insertMathInline' })}>
-              <span>{t.mathInline()}</span><small>$…$</small>
-            </button>
-            <button type="button" role="menuitem" on:mousedown|preventDefault
-              on:click={() => insertMath({ type: 'insertMathBlock', tex: 'E = mc^2' })}>
-              <span>{t.mathBlock()}</span><small>$$…$$</small>
-            </button>
-          </div>
-        {/if}
-      </div>
-      <div class="diagram-picker-anchor" use:clickOutside={closeDiagramPicker}>
-        <button
-          title={t.nonstandardMarkdownTooltip({ label: t.diagram() })}
-          aria-haspopup="menu"
-          aria-expanded={diagramPickerOpen}
-          aria-label={t.insertDiagram()}
-          class:active={diagramPickerOpen}
-          on:click|stopPropagation={toggleDiagramPicker}
-        >
-          <Braces size={17} />
-        </button>
-        {#if diagramPickerOpen}
-          <div
-            class="diagram-picker-popover"
-            role="menu"
-            aria-label={t.insertDiagram()}
-            tabindex="-1"
-            on:keydown={handleDiagramPickerKeydown}
-          >
-            <div class="diagram-picker-header">{t.diagram()}</div>
-            <button type="button" role="menuitem" on:click={insertBlankDiagram}>
-              <span>{t.blankDiagram()}</span>
-              <small>mermaid</small>
-            </button>
-            <div class="diagram-picker-header">{t.template()}</div>
-            {#each DIAGRAM_TEMPLATES as template}
-              <button type="button" role="menuitem" on:click={() => insertDiagram(template.type)}>
-                <span>{getDiagramTypeLabel(template.type)}</span>
-                <small>{template.type}</small>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
     </div>
     <span class="divider toolbar-actions-divider"></span>
     </div>

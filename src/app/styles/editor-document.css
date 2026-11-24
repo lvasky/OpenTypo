@@ -1739,6 +1739,10 @@
   background-color: var(--md-editor-hover-bg);
 }
 
+.math-block-source-fence {
+  font-family: var(--md-editor-font-mono);
+}
+
 .math-block-textarea {
   display: block;
   box-sizing: border-box;
@@ -1787,49 +1791,16 @@
 .math-inline-input {
   display: inline;
   width: auto;
-  min-width: 40px;
-  padding: 1px 4px;
-  border: 1px solid var(--md-editor-accent);
-  border-radius: var(--md-editor-radius-sm, 3px);
-  background: var(--md-editor-surface);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--md-editor-fg);
   font-family: var(--md-editor-font-mono);
   font-size: inherit;
   line-height: inherit;
   vertical-align: baseline;
   outline: none;
-}
-
-/* 浮动预览卡片 */
-.math-inline-preview {
-  pointer-events: none;
-  background: var(--md-editor-surface);
-  border: 1px solid var(--md-editor-code-border);
-  border-radius: var(--md-editor-radius-md, 6px);
-  box-shadow: var(--md-editor-shadow);
-  padding: 8px 12px;
-  overflow-x: auto;
-  min-width: 50px;
-  min-height: 24px;
-}
-
-.math-inline-preview-content {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  min-height: 20px;
-}
-
-.math-inline-preview-content .katex {
-  font-size: 1.1em;
-}
-
-.math-inline-preview-error {
-  color: var(--md-editor-warning);
-  font-size: 13px;
-  font-family: var(--md-editor-font-mono);
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 /* ---- 行内代码 code mark ---- */
@@ -2405,29 +2376,26 @@
 .prosemirror-host .details-default-open[aria-checked="true"]::before { content: '✓ '; }
 
 .pm-markdown-source-widget {
-  position: relative;
   display: inline-block;
-  inline-size: 0;
-  block-size: 0;
-  z-index: 5;
+  max-inline-size: 100%;
+  vertical-align: baseline;
 }
 
 .pm-markdown-source-widget input {
-  position: absolute;
-  inset-inline-start: 0;
-  inset-block-end: 0.9em;
   box-sizing: border-box;
-  inline-size: min(28rem, 42vw);
-  padding: 0.3rem 0.45rem;
-  border: 1px solid var(--md-editor-border);
-  border-radius: 4px;
-  background: var(--md-editor-bg);
-  color: var(--md-editor-fg);
-  font: 0.9em monospace;
+  max-inline-size: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
 }
 
-.pm-markdown-source-widget.is-below input {
-  inset-block: 0.4em auto;
+.ProseMirror[contenteditable='true'] .pm-markdown-source-hidden,
+.ProseMirror[contenteditable='true'] .footnote-def:has(.pm-markdown-source-widget) > .footnote-def-marker {
+  display: none !important;
 }
 
 .ProseMirror[contenteditable='false'] .pm-markdown-source-widget {
