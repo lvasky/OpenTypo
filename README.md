@@ -5,7 +5,7 @@
 <h1 align="center">OpenTypo</h1>
 
 <p align="center">
-  <a href="https://github.com/lvasky/nomo/releases">
+  <a href="https://github.com/lvasky/OpenTypo/releases">
     <img src="https://img.shields.io/badge/releases-GitHub-blue" alt="GitHub Release">
   </a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey" alt="支持 macOS 与 Windows">
@@ -34,7 +34,7 @@ OpenTypo 基于 Nomo 开发，目标是让 Markdown 实时编辑像 Typora 一�
 
 ## 下载与安装
 
-Windows 10 / 11（x64）可下载 `.exe` 安装版或 `.zip` 免安装版。macOS 用户可参照下文的开发说明从源码构建。[GitHub Releases](https://github.com/lvasky/nomo/releases)
+Windows 10 / 11（x64）可下载 `.exe` 安装版或 `.zip` 免安装版。macOS 用户可参照下文的开发说明从源码构建。[GitHub Releases](https://github.com/lvasky/OpenTypo/releases)
 
 ## 核心特点
 
@@ -47,7 +47,7 @@ Windows 10 / 11（x64）可下载 `.exe` 安装版或 `.zip` 免安装版。macO
 - **舒适写作**：浅深色主题、[自定义配色主题与字体](docs/custom-themes.md)、可手动开启的精细排版，以及可置顶的 Markdown 小窗。
 - **导出与预览**：导出 HTML / PDF / Word（.docx），Word 正文和表格可编辑，公式与图表转为图片；macOS 支持 Quick Look 快速预览。
 
-版本变化见项目发布记录。[更新记录](https://github.com/lvasky/nomo/releases)
+版本变化见项目发布记录。[更新记录](https://github.com/lvasky/OpenTypo/releases)
 
 ## 开发
 
@@ -63,9 +63,9 @@ pnpm tauri dev
 
 ## 参与项目
 
-欢迎反馈问题、提出建议或贡献代码。反馈问题时请附系统版本、复现步骤与样例。[提交 Issue](https://github.com/lvasky/nomo/issues) · [提交 Pull Request](https://github.com/lvasky/nomo/pulls)
+欢迎反馈问题、提出建议或贡献代码。反馈问题时请附系统版本、复现步骤与样例。[提交 Issue](https://github.com/lvasky/OpenTypo/issues) · [提交 Pull Request](https://github.com/lvasky/OpenTypo/pulls)
 
-欢迎为 OpenTypo 点 Star，也欢迎关注 Nomo 原作者和社区。[项目仓库](https://github.com/lvasky/nomo) · [LIXianSenQwQ](https://github.com/LIXianSenQwQ) · [linux.do](https://linux.do/)
+欢迎为 OpenTypo 点 Star，也欢迎关注 Nomo 原作者和社区。[项目仓库](https://github.com/lvasky/OpenTypo) · [LIXianSenQwQ](https://github.com/LIXianSenQwQ) · [linux.do](https://linux.do/)
 
 采用 [AGPL-3.0-or-later](./LICENSE) 许可证；商业授权请联系维护者，第三方组件遵循各自许可证。
 

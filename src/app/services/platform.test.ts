@@ -3,7 +3,6 @@ import {
   detectAppPlatform,
   formatShortcutLabel,
   getPlatformCapabilities,
-  HOMEBREW_SETUP_COMMAND,
 } from './platform';
 
 describe('platform', () => {
@@ -35,10 +34,5 @@ describe('platform', () => {
     expect(formatShortcutLabel('Ctrl+Shift+Z', 'macos')).toBe('⇧\u202F⌘\u202FZ');
     expect(formatShortcutLabel('Ctrl+X', 'windows')).toBe('Ctrl+X');
     expect(formatShortcutLabel('Ctrl+Shift+V', 'windows')).toBe('Ctrl+Shift+V');
-  });
-
-  it('keeps a tap-and-install Homebrew command for macOS updates', () => {
-    expect(HOMEBREW_SETUP_COMMAND).toContain('brew tap nomo-md/nomo');
-    expect(HOMEBREW_SETUP_COMMAND).toContain('brew install --cask nomo');
   });
 });

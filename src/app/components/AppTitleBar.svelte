@@ -477,7 +477,7 @@
 
       {#if shouldShowWindowMenu}
         <div class="titlebar-left" data-drag-region>
-          <span class="app-name" data-drag-region>Nomo</span>
+          <span class="app-name" data-drag-region>{t.appName()}</span>
         </div>
 
         <nav class="titlebar-menu">

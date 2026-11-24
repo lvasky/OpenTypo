@@ -106,7 +106,7 @@ export const JA_JP_EXTRA_TRANSLATIONS = {
   importUserTheme: 'テーマを読み込む…',
   exportThemeTemplate: '現在のテーマをテンプレートとして書き出す…',
   deleteUserTheme: 'テーマを削除',
-  deleteUserThemeConfirm: 'テーマ「{name}」を削除しますか？読み込んだコピーが Nomo から削除されます。元のファイルには影響しません。',
+  deleteUserThemeConfirm: 'テーマ「{name}」を削除しますか？読み込んだコピーが OpenTypo から削除されます。元のファイルには影響しません。',
   userThemeImported: 'テーマ「{name}」を読み込みました',
   userThemeImportFailed: 'テーマを読み込めませんでした：{error}',
   userThemeDeleteFailed: 'テーマを削除できませんでした：{error}',
@@ -135,7 +135,7 @@ export const JA_JP_EXTRA_TRANSLATIONS = {
     '新しいファイルをシングルクリックするとプレビュータブで開きます。別のファイルを開くか、編集またはダブルクリックすると固定されます。',
   hideExplorerOnLaunch: '起動時にエクスプローラーのサイドバーを非表示にする',
   hideExplorerOnLaunchDescription:
-    '次回野茂が開くときは、サイドバーを折りたたんだままにしておきます。',
+    '次回OpenTypoが開くときは、サイドバーを折りたたんだままにしておきます。',
   closeToTray: 'トレイに隠す',
   closeToTrayDescription:
     '閉じるときにメイン エディタ ウィンドウをシステム トレイに隠します。アプリを終了しても影響を受けません。',
@@ -144,7 +144,7 @@ export const JA_JP_EXTRA_TRANSLATIONS = {
   closeWindowBehaviorAskEveryTime: '毎回選択',
   closeWindowBehaviorCloseWindow: 'ウィンドウを閉じる',
   closeWindowBehaviorCloseToTray: 'トレイに隠す',
-  closeWindowChoiceTitle: 'Nomo を閉じる',
+  closeWindowChoiceTitle: 'OpenTypo を閉じる',
   closeWindowChoiceMessage: 'メインウィンドウを閉じるときの動作を選択してください。',
   unsavedChangesBeforeClosingWindow:
     '未保存の変更があるファイルがあります: {names}。このウィンドウを閉じてもよろしいですか？',
@@ -170,7 +170,7 @@ export const JA_JP_EXTRA_TRANSLATIONS = {
   registered: '登録済み',
   unregistered: '未登録',
   opening: 'オープニング...',
-  chooseNomo: '野茂を選ぶ',
+  chooseNomo: 'OpenTypoを選ぶ',
   bindMd: '.mdをバインド',
   unbinding: 'バインド解除中...',
   unbindMd: 'バインド解除',
@@ -184,13 +184,13 @@ export const JA_JP_EXTRA_TRANSLATIONS = {
     'デフォルトのアプリ バインディングは現在、Windows でのみサポートされています。',
   mdAssociationCheckingDescription: '現在の Windows.md デフォルト アプリを読み取ります。',
   mdAssociationDefaultDescription:
-    'Nomo を Windows の既定アプリ候補として登録し、システム設定で確認します。',
+    'OpenTypo を Windows の既定アプリ候補として登録し、システム設定で確認します。',
   contextMenuDesktopOnly:
     'システム コンテキスト メニューを登録できるのは Windows デスクトップ アプリのみです。',
   contextMenuWindowsOnly: 'コンテキスト メニューの登録は現在 Windows でのみサポートされています。',
   contextMenuCheckingDescription: '現在の Windows コンテキスト メニューの登録状態を読み取ります。',
   contextMenuDefaultDescription:
-    '.md / .markdown ファイルとフォルダーのコンテキストメニューに Nomo を追加します。',
+    '.md / .markdown ファイルとフォルダーのコンテキストメニューに OpenTypo を追加します。',
   imageImport: '画像のインポート',
   imageHandlingStrategy: '画像処理戦略',
   imageHandlingStrategyDescription: '貼り付け、ドロップ、アップロードした画像のデフォルトの戦略。',
@@ -213,7 +213,7 @@ export const JA_JP_EXTRA_TRANSLATIONS = {
   picgoCoreConfigPathDescription:
     'デフォルトの PicGo-Core 構成を使用するには、空にすることができます。',
   connectionTest: '接続テスト',
-  connectionTestDescription: 'Nomo が現在の PicGo 設定を呼び出すことができるかどうかを確認します。',
+  connectionTestDescription: 'OpenTypo が現在の PicGo 設定を呼び出すことができるかどうかを確認します。',
   testing: 'テスト中...',
   testConnection: 'テスト接続',
   imageDefaultWidth: 'デフォルトの画像幅',
@@ -301,20 +301,18 @@ export const JA_JP_EXTRA_TRANSLATIONS = {
   developerModeDescription: '有効にすると、実行時ログが出力され、問題の調査に役立ちます。',
   version: 'バージョン',
   positioning: '位置決め',
-  positioningDescription:
-    'ローカルファースト、Markdown ファーストの軽量デスクトップ Markdown エディター。',
+  positioningDescription: 'Nomo を基に開発したオープンソースの Markdown エディター。Typora のようなリアルタイム編集を目指し、表の編集、標準 Markdown、Git の差分を小さく保つソースの維持を重視しています。',
   platformStrategy: '対応プラットフォーム',
-  platformStrategyDescription:
-    'macOS と Windows をサポートし、各プラットフォームのネイティブなファイル、ウィンドウ、ショートカット体験を継続的に改善しています。',
+  platformStrategyDescription: 'Windows 10 / 11（x64）向けのインストーラー版とポータブル版があります。macOS ではリポジトリの開発手順に従ってソースからビルドできます。',
   githubRepository: 'GitHub リポジトリ',
   githubRepositoryDescription: 'ソースコード、リリース、プロジェクトの更新を確認します。',
   reportIssue: 'Issue を報告',
   reportIssueDescription: '不具合を報告したり、機能を提案したりできます。',
   externalLinkOpenFailed: 'リンクを開けませんでした。時間をおいて再試行してください。',
   updateCheck: 'アップデートチェック',
-  updateCheckDescription: 'GitHub リリースから安定した Nomo アップデートを確認してください。',
+  updateCheckDescription: 'GitHub Releases で OpenTypo の更新を確認します。',
   softwareUpdateCheckNow: 'アップデートを確認する',
-  softwareUpdateChecking: '野茂の新バージョンをチェック中。',
+  softwareUpdateChecking: 'OpenTypoの新バージョンをチェック中。',
   softwareUpdateCheckingShort: 'チェック中...',
   softwareUpdateUpToDate: '最新バージョンを使用しています。',
   softwareUpdateAvailable: 'バージョン {version} が利用可能です。ダウンロードを準備しています。',
@@ -326,7 +324,7 @@ export const JA_JP_EXTRA_TRANSLATIONS = {
   softwareUpdateWaitingInstall:
     '更新をダウンロードし、MD5 で検証しました。再起動してインストールする確認を待っています。',
   softwareUpdateRestartAndInstall: '再起動してインストール',
-  softwareUpdateInstalling: 'インストーラーを起動しています。野茂は再始動する。',
+  softwareUpdateInstalling: 'インストーラーを起動しています。OpenTypoは再始動する。',
   softwareUpdateInstallingShort: 'インストール中...',
   softwareUpdateFailed: 'アップデートチェックまたはダウンロードに失敗しました。',
   softwareUpdateIntegrityFailed:
@@ -334,26 +332,24 @@ export const JA_JP_EXTRA_TRANSLATIONS = {
   softwareUpdateInstallFailed: 'アップデートのインストールに失敗しました。',
   softwareUpdateUnsupported:
     'ここでは自動更新は利用できません。ポータブル zip ビルドを使用している場合は、新しいバージョンを手動でダウンロードします。',
-  softwareUpdateUnsupportedMacos:
-    'macOS ではアプリ内の自動更新はまだ利用できません。Homebrew でインストールまたはアップグレードするか、GitHub Release から DMG を入手してください。',
-  softwareUpdateCopyHomebrewCommand: 'Homebrew コマンドをコピー',
-  softwareUpdateHomebrewCopied: 'Homebrew コマンドをコピーしました',
+  softwareUpdateUnsupportedMacos: 'プロジェクトのリリース情報を確認し、macOS ではリポジトリの開発手順に従ってソースからビルドしてください。',
+  softwareUpdateOpenReleases: 'リリースを見る',
   softwareUpdateLatest: '最新',
   softwareUpdateReady: '準備ができて',
   softwareUpdateManual: '手動チェック',
-  softwareUpdateNoticeTitle: 'Nomo の新しいバージョンを利用できます',
+  softwareUpdateNoticeTitle: 'OpenTypo の新しいバージョンを利用できます',
   softwareUpdateNoticeSummary: '改善と不具合修正が含まれています。更新内容を確認できます。',
   softwareUpdateDismissVersion: 'このバージョンを今後通知しない',
   softwareUpdateRemindLater: '後で通知',
   softwareUpdateViewDetails: '更新内容を見る',
-  softwareUpdateReleaseTitle: 'Nomo v{version} が公開されました',
-  softwareUpdateInstalledTitle: 'Nomo が v{version} に更新されました',
-  softwareUpdateStartUsing: 'Nomo を使い始める',
+  softwareUpdateReleaseTitle: 'OpenTypo v{version} が公開されました',
+  softwareUpdateInstalledTitle: 'OpenTypo が v{version} に更新されました',
+  softwareUpdateStartUsing: 'OpenTypo を使い始める',
   softwareUpdateInstalledHint: 'このバージョンの更新内容',
   softwareUpdateReleaseFallback: 'このリリースには改善と不具合修正が含まれています。',
   softwareUpdatePortableTitle: 'ポータブル版を使用中',
   softwareUpdatePortableHint:
-    'zip をダウンロードした後、Nomo を終了して既存のフォルダーを手動で置き換えてください。',
+    'zip をダウンロードした後、OpenTypo を終了して既存のフォルダーを手動で置き換えてください。',
   softwareUpdateReadyHint: '再起動後にインストールが完了します。',
   softwareUpdateInstallSafeTitle: 'インストール前にアプリは再起動しません',
   softwareUpdateInstallSafeHint: 'ダウンロード後、インストールするタイミングを選べます。',
@@ -364,7 +360,7 @@ export const JA_JP_EXTRA_TRANSLATIONS = {
   softwareUpdateAutoCheckDescription:
     'コールドスタートごとにバックグラウンドで一度確認します。失敗時は通知しません。',
   softwareUpdateStoreManaged:
-    '更新は Microsoft Store によって管理され、Nomo は GitHub のインストーラーをダウンロードしません。',
+    '更新は Microsoft Store によって管理され、OpenTypo は GitHub のインストーラーをダウンロードしません。',
   softwareUpdateStorePill: 'Microsoft Store',
   softwareUpdateStoreManagedHint:
     'Microsoft Store が利用可能な更新のダウンロードとインストールを管理します。',

@@ -5,7 +5,7 @@
 <h1 align="center">OpenTypo</h1>
 
 <p align="center">
-  <a href="https://github.com/lvasky/nomo/releases">
+  <a href="https://github.com/lvasky/OpenTypo/releases">
     <img src="https://img.shields.io/badge/releases-GitHub-blue" alt="GitHub Release">
   </a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey" alt="Available for macOS and Windows">
@@ -34,7 +34,7 @@ We want one open-source editor where live rendering feels responsive and editing
 
 ## Download and Install
 
-Windows 10 / 11 (x64) builds are available as an `.exe` installer or a portable `.zip`. On macOS, follow the development instructions below to build from source. [GitHub Releases](https://github.com/lvasky/nomo/releases)
+Windows 10 / 11 (x64) builds are available as an `.exe` installer or a portable `.zip`. On macOS, follow the development instructions below to build from source. [GitHub Releases](https://github.com/lvasky/OpenTypo/releases)
 
 ## Features
 
@@ -47,7 +47,7 @@ Windows 10 / 11 (x64) builds are available as an `.exe` installer or a portable 
 - **Comfortable writing**: Light and dark themes, [custom color themes and fonts](docs/custom-themes.md) (guide in Chinese), optional fine typography and an always-on-top Markdown mini window.
 - **Export and preview**: Export HTML / PDF / Word (.docx), with editable Word text and tables, formulas and diagrams as images, and Quick Look previews on macOS.
 
-Version changes are documented with each release. [Release notes](https://github.com/lvasky/nomo/releases)
+Version changes are documented with each release. [Release notes](https://github.com/lvasky/OpenTypo/releases)
 
 ## Development
 
@@ -63,9 +63,9 @@ pnpm tauri dev
 
 ## Get Involved
 
-We welcome bug reports, suggestions, and code contributions. When reporting a bug, include your OS version, steps to reproduce, and a sample. [Open an issue](https://github.com/lvasky/nomo/issues) · [Open a pull request](https://github.com/lvasky/nomo/pulls)
+We welcome bug reports, suggestions, and code contributions. When reporting a bug, include your OS version, steps to reproduce, and a sample. [Open an issue](https://github.com/lvasky/OpenTypo/issues) · [Open a pull request](https://github.com/lvasky/OpenTypo/pulls)
 
-If you find OpenTypo useful, give it a star and follow Nomo’s creator and community. [Project repository](https://github.com/lvasky/nomo) · [LIXianSenQwQ](https://github.com/LIXianSenQwQ) · [linux.do](https://linux.do/)
+If you find OpenTypo useful, give it a star and follow Nomo’s creator and community. [Project repository](https://github.com/lvasky/OpenTypo) · [LIXianSenQwQ](https://github.com/LIXianSenQwQ) · [linux.do](https://linux.do/)
 
 Licensed under [AGPL-3.0-or-later](./LICENSE); contact the maintainers for separate commercial licensing. Third-party components retain their own licenses.
 

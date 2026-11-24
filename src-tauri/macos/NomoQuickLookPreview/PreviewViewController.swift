@@ -317,7 +317,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController, WKN
             <html lang="zh-CN">
               <body style="margin:0;display:grid;min-height:100vh;place-items:center;font:14px -apple-system,BlinkMacSystemFont,sans-serif;color:#68707a;background:#fff;">
                 <main style="display:grid;gap:8px;text-align:center;padding:24px;">
-                  <strong style="color:#202428;font-size:16px;">无法生成 Nomo 预览</strong>
+                  <strong style="color:#202428;font-size:16px;">无法生成 OpenTypo 预览</strong>
                   <span>\(message)</span>
                 </main>
               </body>

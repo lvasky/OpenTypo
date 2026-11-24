@@ -6,7 +6,7 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>zh_CN</string>
   <key>CFBundleDisplayName</key>
-  <string>Nomo Quick Look</string>
+  <string>OpenTypo Quick Look</string>
   <key>CFBundleExecutable</key>
   <string>NomoQuickLookPreview</string>
   <key>CFBundleIdentifier</key>
@@ -18,7 +18,7 @@
   <key>CFBundlePackageType</key>
   <string>XPC!</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.6.7</string>
+  <string>1.0.0</string>
   <key>CFBundleVersion</key>
   <string>3020</string>
   <key>LSMinimumSystemVersion</key>

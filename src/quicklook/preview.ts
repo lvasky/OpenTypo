@@ -239,7 +239,7 @@ export function renderMarkdownPreview(markdown: string, options: QuickLookPrevie
   return `
     <article class="quicklook-document">
       <header class="quicklook-header">
-        <div class="quicklook-kicker">Nomo Quick Look</div>
+        <div class="quicklook-kicker">OpenTypo Quick Look</div>
         <h1>${title}</h1>
       </header>
       <div class="quicklook-markdown rich-markdown">

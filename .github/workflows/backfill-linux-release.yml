@@ -106,8 +106,9 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          deb="build-source/src-tauri/target/release/bundle/deb/Nomo_${version}_amd64.deb"
-          rpm="build-source/src-tauri/target/release/bundle/rpm/Nomo-${version}-1.x86_64.rpm"
+          product_name="$(node -p 'require("./build-source/src-tauri/tauri.conf.json").productName')"
+          deb="build-source/src-tauri/target/release/bundle/deb/${product_name}_${version}_amd64.deb"
+          rpm="build-source/src-tauri/target/release/bundle/rpm/${product_name}-${version}-1.x86_64.rpm"
           [[ "$(dpkg-deb -f "$deb" Version)" == "$version" ]]
           [[ "$(dpkg-deb -f "$deb" Architecture)" == 'amd64' ]]
           [[ "$(rpm -qp --queryformat '%{VERSION}' "$rpm")" == "$version" ]]
@@ -125,8 +126,9 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          deb="build-source/src-tauri/target/release/bundle/deb/Nomo_${version}_amd64.deb"
-          rpm="build-source/src-tauri/target/release/bundle/rpm/Nomo-${version}-1.x86_64.rpm"
+          product_name="$(node -p 'require("./build-source/src-tauri/tauri.conf.json").productName')"
+          deb="build-source/src-tauri/target/release/bundle/deb/${product_name}_${version}_amd64.deb"
+          rpm="build-source/src-tauri/target/release/bundle/rpm/${product_name}-${version}-1.x86_64.rpm"
           # 仅添加 Linux 包；已有安装包不使用 --clobber。
           gh release upload "$RELEASE_TAG" "$deb" "$rpm"
           gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/release-after.json"

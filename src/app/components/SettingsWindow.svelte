@@ -98,7 +98,7 @@
     ImageInsertStrategy,
     ImageUploadProvider,
   } from '../../lib/services/render';
-  import { getPlatformCapabilities, HOMEBREW_SETUP_COMMAND } from '../services/platform';
+  import { getPlatformCapabilities } from '../services/platform';
   import {
     disposeSoftwareUpdateCoordinator,
     initializeSoftwareUpdateCoordinator,
@@ -112,8 +112,9 @@
   import nomoLogoDark from '../../../src-tauri/icons/nomo/source/nomo-app-dark.svg?url';
   import nomoLogoLight from '../../../src-tauri/icons/nomo/source/nomo-app-light.svg?url';
 
-  const GITHUB_REPOSITORY_URL = 'https://github.com/lvasky/nomo';
-  const GITHUB_ISSUE_URL = 'https://github.com/lvasky/nomo/issues/new/choose';
+  const GITHUB_REPOSITORY_URL = 'https://github.com/lvasky/OpenTypo';
+  const GITHUB_ISSUE_URL = `${GITHUB_REPOSITORY_URL}/issues/new/choose`;
+  const GITHUB_RELEASES_URL = `${GITHUB_REPOSITORY_URL}/releases`;
 
   type CategoryId =
     | 'general'
@@ -855,7 +856,7 @@
               : updateStatus === 'installing'
                 ? t.softwareUpdateInstallingShort()
                 : updateStatus === 'unsupported' && platformCapabilities.isMac
-                  ? t.softwareUpdateCopyHomebrewCommand()
+                  ? t.softwareUpdateOpenReleases()
                   : t.softwareUpdateCheckNow();
 
   $: softwareUpdateDescription = updateState.error
@@ -910,19 +911,10 @@
       return;
     }
     if (updateState.status === 'unsupported' && platformCapabilities.isMac) {
-      void copyHomebrewSetupCommand();
+      void openProjectLink(GITHUB_RELEASES_URL);
       return;
     }
     void checkForSoftwareUpdate();
-  }
-
-  async function copyHomebrewSetupCommand() {
-    try {
-      await navigator.clipboard.writeText(HOMEBREW_SETUP_COMMAND);
-      showStatus(t.softwareUpdateHomebrewCopied());
-    } catch {
-      showStatus(t.copyFailed());
-    }
   }
 
   async function openMicrosoftStoreProduct() {
@@ -2988,7 +2980,7 @@
                   <img class="logo-dark" src={nomoLogoDark} alt="" draggable="false" />
                 </div>
                 <div class="about-identity-copy">
-                  <h2>Nomo</h2>
+                  <h2>{t.appName()}</h2>
                   <span
                     class="about-version-badge"
                     aria-label={`${t.version()} ${packageInfo.version}`}

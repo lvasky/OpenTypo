@@ -3,6 +3,7 @@ name: Release Windows strict Markdown
 on:
   push:
     tags:
+      - 'v*.*.*'
       - 'windows-strict-markdown-v*.*.*'
 
 permissions:
@@ -14,6 +15,7 @@ concurrency:
 
 jobs:
   release:
+    if: github.repository == 'lvasky/OpenTypo' || startsWith(github.ref_name, 'windows-strict-markdown-v')
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -71,10 +73,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          if ($env:GITHUB_REF_NAME -ne "windows-strict-markdown-v$version") {
-            throw "Release tag does not match Nomo version $version"
+          if ($env:GITHUB_REF_NAME -notin @("v$version", "windows-strict-markdown-v$version")) {
+            throw "Release tag does not match OpenTypo version $version"
           }
-          "NOMO_RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+          "OPENTYPO_RELEASE_VERSION=$version" >> $env:GITHUB_ENV
 
       - name: Build native Windows installer
         run: pnpm build:win64:nsis
@@ -86,18 +88,18 @@ jobs:
           $release = 'src-tauri/target/x86_64-pc-windows-msvc/release'
           $installers = @(Get-ChildItem "$release/bundle/nsis/*-setup.exe")
           if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS installer' }
-          $version = $env:NOMO_RELEASE_VERSION
-          Copy-Item $installers[0].FullName "artifacts/Nomo_${version}_x64-setup.exe"
-          $app = Join-Path $env:RUNNER_TEMP 'Nomo-strict-markdown/Nomo'
+          $version = $env:OPENTYPO_RELEASE_VERSION
+          Copy-Item $installers[0].FullName "artifacts/OpenTypo_${version}_x64-setup.exe"
+          $app = Join-Path $env:RUNNER_TEMP 'OpenTypo-strict-markdown/OpenTypo'
           New-Item -ItemType Directory -Force "$app/samples/assets" | Out-Null
-          Copy-Item "$release/nomo.exe" "$app/Nomo.exe"
+          Copy-Item "$release/nomo.exe" "$app/OpenTypo.exe"
           if (Test-Path "$release/WebView2Loader.dll") {
             Copy-Item "$release/WebView2Loader.dll" $app
           }
           Copy-Item sample.md "$app/samples/sample.md"
           Copy-Item assets/128x128.png "$app/samples/assets/128x128.png"
           Copy-Item LICENSE "$app/LICENSE"
-          Compress-Archive -Path $app -DestinationPath "artifacts/Nomo_${version}_x64.zip"
+          Compress-Archive -Path $app -DestinationPath "artifacts/OpenTypo_${version}_x64.zip"
           Get-FileHash artifacts/*.exe, artifacts/*.zip -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))" } |
             Set-Content artifacts/SHA256SUMS.txt -Encoding utf8
@@ -111,13 +113,17 @@ jobs:
           GH_REPO: ${{ github.repository }}
         shell: pwsh
         run: |
-          $version = $env:NOMO_RELEASE_VERSION
+          $version = $env:OPENTYPO_RELEASE_VERSION
+          $releaseFlags = @('--latest')
+          if ($env:GITHUB_REF_NAME.StartsWith('windows-strict-markdown-v')) {
+            $releaseFlags = @('--prerelease', '--latest=false')
+          }
           gh release create "$env:GITHUB_REF_NAME" `
-            "artifacts/Nomo_${version}_x64-setup.exe" `
-            "artifacts/Nomo_${version}_x64.zip" `
+            "artifacts/OpenTypo_${version}_x64-setup.exe" `
+            "artifacts/OpenTypo_${version}_x64.zip" `
             artifacts/checksums.md5 `
             artifacts/SHA256SUMS.txt `
-            --verify-tag --prerelease --latest=false `
-            --title "Nomo $version · Markdown 源码保留与更新源修复（Windows x64）" `
+            --verify-tag @releaseFlags `
+            --title "OpenTypo $version（Windows x64）" `
             --notes-file ".github/release-notes/v$version.md"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

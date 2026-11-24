@@ -9,8 +9,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow};
 
-const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/lvasky/nomo/releases";
-const GITHUB_DOWNLOAD_PATH: &str = "/lvasky/nomo/releases/download/";
+const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/lvasky/OpenTypo/releases";
+const GITHUB_DOWNLOAD_PATH: &str = "/lvasky/OpenTypo/releases/download/";
 const WINDOWS_RELEASE_TAG_PREFIX: &str = "windows-strict-markdown-v";
 const GITHUB_PROXY_PREFIX: &str = "https://gh-proxy.com/";
 const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -783,9 +783,11 @@ async fn download_software_update_inner<R: Runtime>(
         return Err("当前环境不支持自动更新：仅 Windows 安装版支持应用内更新。".to_string());
     }
     validate_md5(&candidate.md5)?;
-    let expected_name = expected_asset_name(candidate.asset_kind, &candidate.version);
+    let version = semver::Version::parse(&candidate.version)
+        .map_err(|error| format!("更新版本号无效：{error}"))?;
+    let expected_name = expected_asset_name(candidate.asset_kind, &version.to_string());
     if candidate.asset_name != expected_name || !is_fork_download_url(&candidate.download_url) {
-        return Err("更新安装包不属于 lvasky/nomo 的发布。".to_string());
+        return Err("更新安装包不属于 lvasky/OpenTypo 的发布。".to_string());
     }
 
     let update_dir = software_update_cache_dir(&app)?;
@@ -946,7 +948,7 @@ fn install_software_update_inner<R: Runtime>(
 #[cfg(target_os = "windows")]
 fn is_current_windows_installer_installation() -> Result<bool, String> {
     let exe_path = std::env::current_exe()
-        .map_err(|error| format!("读取 Nomo 可执行文件路径失败：{error}"))?;
+        .map_err(|error| format!("读取 OpenTypo 可执行文件路径失败：{error}"))?;
     is_windows_installer_installation_for_path(&exe_path)
 }
 
@@ -988,7 +990,7 @@ fn is_windows_installer_installation_for_path(exe_path: &Path) -> Result<bool, S
         &format!("开始查询注册表安装位置，可执行文件：{}", exe_path.display()),
     );
 
-    let hkcu_location = query_install_location("HKCU")?;
+    let hkcu_location = query_install_location("HKCU", "OpenTypo")?;
     crate::app_logger::info(
         "Update",
         &format!(
@@ -999,7 +1001,7 @@ fn is_windows_installer_installation_for_path(exe_path: &Path) -> Result<bool, S
     );
 
     let hkcu_elapsed = timer.elapsed();
-    let hklm_location = query_install_location("HKLM")?;
+    let hklm_location = query_install_location("HKLM", "OpenTypo")?;
     crate::app_logger::info(
         "Update",
         &format!(
@@ -1026,10 +1028,10 @@ fn is_windows_installer_installation_for_path(exe_path: &Path) -> Result<bool, S
 }
 
 #[cfg(target_os = "windows")]
-fn query_install_location(root: &str) -> Result<Option<String>, String> {
+fn query_install_location(root: &str, product_name: &str) -> Result<Option<String>, String> {
     query_reg_value(
         root,
-        "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Nomo",
+        &format!("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{product_name}"),
         "InstallLocation",
     )
 }
@@ -1037,7 +1039,7 @@ fn query_install_location(root: &str) -> Result<Option<String>, String> {
 #[cfg(target_os = "windows")]
 pub(crate) fn legacy_windows_installer_exists() -> Result<bool, String> {
     for root in ["HKCU", "HKLM"] {
-        if let Some(location) = query_install_location(root)? {
+        if let Some(location) = query_install_location(root, "Nomo")? {
             let install_dir = PathBuf::from(location.trim().trim_matches('"'));
             if install_dir.join("uninstall.exe").is_file() {
                 return Ok(true);
@@ -1203,7 +1205,7 @@ async fn fetch_latest_github_release_from_source(
         SoftwareUpdateRequestFailure::from_reqwest("解析 GitHub Release 更新信息失败", error)
     })?;
     newest_windows_release(releases).ok_or_else(|| {
-        SoftwareUpdateRequestFailure::terminal("lvasky/nomo 暂无带完整更新文件的 Windows 发布。")
+        SoftwareUpdateRequestFailure::terminal("lvasky/OpenTypo 暂无带完整更新文件的 Windows 发布。")
     })
 }
 
@@ -1391,7 +1393,7 @@ fn update_request_url(
 ) -> Result<String, SoftwareUpdateRequestFailure> {
     if original_url != GITHUB_RELEASES_API && !is_fork_download_url(original_url) {
         return Err(SoftwareUpdateRequestFailure::terminal(
-            "更新地址不属于 lvasky/nomo 的发布。",
+            "更新地址不属于 lvasky/OpenTypo 的发布。",
         ));
     }
     Ok(match source {
@@ -1423,7 +1425,7 @@ fn is_retryable_update_status(status: reqwest::StatusCode) -> bool {
 
 fn release_http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .user_agent("Nomo software updater")
+        .user_agent("OpenTypo software updater")
         .connect_timeout(UPDATE_CONNECT_TIMEOUT)
         .read_timeout(UPDATE_DOWNLOAD_READ_TIMEOUT)
         .build()
@@ -1470,7 +1472,7 @@ fn select_windows_installer_asset<'a>(
     assets: &'a [GitHubReleaseAsset],
     version: &str,
 ) -> Option<&'a GitHubReleaseAsset> {
-    let expected_name = format!("Nomo_{version}_x64-setup.exe");
+    let expected_name = format!("OpenTypo_{version}_x64-setup.exe");
     assets.iter().find(|asset| asset.name == expected_name)
 }
 
@@ -1478,16 +1480,16 @@ fn select_windows_portable_asset<'a>(
     assets: &'a [GitHubReleaseAsset],
     version: &str,
 ) -> Option<&'a GitHubReleaseAsset> {
-    let expected_name = format!("Nomo_{version}_x64.zip");
+    let expected_name = format!("OpenTypo_{version}_x64.zip");
     assets.iter().find(|asset| asset.name == expected_name)
 }
 
 fn expected_asset_name(kind: SoftwareUpdateAssetKind, version: &str) -> String {
     match kind {
         SoftwareUpdateAssetKind::WindowsInstaller => {
-            format!("Nomo_{version}_x64-setup.exe")
+            format!("OpenTypo_{version}_x64-setup.exe")
         }
-        SoftwareUpdateAssetKind::WindowsPortable => format!("Nomo_{version}_x64.zip"),
+        SoftwareUpdateAssetKind::WindowsPortable => format!("OpenTypo_{version}_x64.zip"),
     }
 }
 
@@ -1707,12 +1709,12 @@ mod tests {
     #[test]
     fn parses_checksums_md5_with_exact_file_name() {
         let checksums = "\
-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  Nomo_0.1.4_x64.zip
-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB  Nomo_0.1.4_x64-setup.exe
-cccccccccccccccccccccccccccccccc  Nomo_0.1.4_x64-setup.exe.sig";
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  OpenTypo_0.1.4_x64.zip
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB  OpenTypo_0.1.4_x64-setup.exe
+cccccccccccccccccccccccccccccccc  OpenTypo_0.1.4_x64-setup.exe.sig";
 
         assert_eq!(
-            find_md5_for_file(checksums, "Nomo_0.1.4_x64-setup.exe").as_deref(),
+            find_md5_for_file(checksums, "OpenTypo_0.1.4_x64-setup.exe").as_deref(),
             Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
         );
     }
@@ -1720,22 +1722,22 @@ cccccccccccccccccccccccccccccccc  Nomo_0.1.4_x64-setup.exe.sig";
     #[test]
     fn ignores_invalid_or_missing_checksum_rows() {
         let checksums = "\
-not-md5  Nomo_0.1.4_x64-setup.exe
+not-md5  OpenTypo_0.1.4_x64-setup.exe
 dddddddddddddddddddddddddddddddd
-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee  Nomo_0.1.4_x64.zip";
+eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee  OpenTypo_0.1.4_x64.zip";
 
         assert_eq!(
-            find_md5_for_file(checksums, "Nomo_0.1.4_x64-setup.exe"),
+            find_md5_for_file(checksums, "OpenTypo_0.1.4_x64-setup.exe"),
             None
         );
     }
 
     #[test]
     fn supports_asset_names_with_spaces() {
-        let checksums = "ffffffffffffffffffffffffffffffff  Nomo Setup 0.1.4 x64.exe";
+        let checksums = "ffffffffffffffffffffffffffffffff  OpenTypo Setup 0.1.4 x64.exe";
 
         assert_eq!(
-            find_md5_for_file(checksums, "Nomo Setup 0.1.4 x64.exe").as_deref(),
+            find_md5_for_file(checksums, "OpenTypo Setup 0.1.4 x64.exe").as_deref(),
             Some("ffffffffffffffffffffffffffffffff")
         );
     }
@@ -1743,28 +1745,28 @@ eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee  Nomo_0.1.4_x64.zip";
     #[test]
     fn selects_only_expected_windows_installer_asset() {
         let assets = vec![
-            asset("Nomo_0.1.4_x64.zip"),
-            asset("Nomo_0.1.4_x64-setup.exe.sig"),
-            asset("Nomo_0.1.4_aarch64.dmg"),
-            asset("Nomo_0.1.4_x64-setup.exe"),
+            asset("OpenTypo_0.1.4_x64.zip"),
+            asset("OpenTypo_0.1.4_x64-setup.exe.sig"),
+            asset("OpenTypo_0.1.4_aarch64.dmg"),
+            asset("OpenTypo_0.1.4_x64-setup.exe"),
         ];
 
         assert_eq!(
             select_windows_installer_asset(&assets, "0.1.4").map(|asset| asset.name.as_str()),
-            Some("Nomo_0.1.4_x64-setup.exe")
+            Some("OpenTypo_0.1.4_x64-setup.exe")
         );
     }
 
     fn release(tag: &str, version: &str, draft: bool, complete: bool) -> GitHubRelease {
         let mut assets: Vec<_> = [
-            format!("Nomo_{version}_x64-setup.exe"),
-            format!("Nomo_{version}_x64.zip"),
+            format!("OpenTypo_{version}_x64-setup.exe"),
+            format!("OpenTypo_{version}_x64.zip"),
             "checksums.md5".into(),
         ]
         .iter()
         .map(|name| GitHubReleaseAsset {
             name: name.clone(),
-            browser_download_url: format!("https://github.com/lvasky/nomo/releases/download/{tag}/{name}"),
+            browser_download_url: format!("https://github.com/lvasky/OpenTypo/releases/download/{tag}/{name}"),
             size: Some(100),
         })
         .collect();
@@ -1795,8 +1797,8 @@ eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee  Nomo_0.1.4_x64.zip";
 
     #[test]
     fn limits_update_downloads_to_this_fork() {
-        assert!(is_fork_download_url("https://github.com/lvasky/nomo/releases/download/v0.6.3/Nomo_0.6.3_x64.zip"));
-        assert!(!is_fork_download_url("https://github.com/nomo-md/nomo/releases/download/v0.6.3/Nomo_0.6.3_x64.zip"));
+        assert!(is_fork_download_url("https://github.com/lvasky/OpenTypo/releases/download/v0.6.3/OpenTypo_0.6.3_x64.zip"));
+        assert!(!is_fork_download_url("https://github.com/nomo-md/nomo/releases/download/v0.6.3/OpenTypo_0.6.3_x64.zip"));
     }
 
     #[test]

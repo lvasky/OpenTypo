@@ -637,7 +637,7 @@ describe('App outline layout', () => {
     expect(tauriWindowsConfig.bundle.targets).toEqual(['nsis']);
     expect(tauriWindowsConfig.bundle.windows.nsis.languages).toEqual(['SimpChinese', 'English']);
     expect(tauriWindowsConfig.bundle.windows.nsis.displayLanguageSelector).toBe(true);
-    expect(tauriWindowsConfig.bundle.windows.nsis.startMenuFolder).toBe('Nomo');
+    expect(tauriWindowsConfig.bundle.windows.nsis.startMenuFolder).toBe('OpenTypo');
     expect(tauriWindowsConfig.bundle.windows.nsis.installerIcon).toBe('icons/icon.ico');
     expect(tauriWindowsConfig.bundle.windows.nsis.uninstallerIcon).toBe('icons/icon.ico');
     expect(tauriWindowsConfig.bundle.windows.nsis.customLanguageFiles.SimpChinese).toBe(
@@ -662,7 +662,7 @@ describe('App outline layout', () => {
 
     expect(releaseWorkflowSource).toContain("args: '--bundles nsis'");
     expect(releaseWorkflowSource).toContain('tauri-apps/tauri-action@v0.6.2');
-    expect(releaseWorkflowSource).toContain('Nomo_${version}_x64.zip');
+    expect(releaseWorkflowSource).toContain('OpenTypo_${version}_x64.zip');
     expect(releaseWorkflowSource).toContain('gh release upload');
     expect(releaseWorkflowSource).toContain('checksums.md5: MD5 校验清单');
     expect(releaseWorkflowSource).toContain('name: Publish MD5 checksums');
@@ -677,6 +677,15 @@ describe('App outline layout', () => {
     expect(tauriConfigSource).not.toContain('createUpdaterArtifacts');
     expect(tauriConfigSource).not.toContain('"pubkey"');
     expect(tauriLibSource).not.toContain('tauri_plugin_updater');
+  });
+
+  it('makes removal of registered Nomo installations an explicit opt-in', () => {
+    expect(windowsOpenWithInstallerHookSource).toContain('NSIS_HOOK_PREINSTALL');
+    expect(windowsOpenWithInstallerHookSource).toContain('IfSilent opentypo_legacy_done');
+    expect(windowsOpenWithInstallerHookSource).toContain('MB_YESNO|MB_DEFBUTTON2');
+    expect(windowsOpenWithInstallerHookSource).toContain('IDYES opentypo_remove_legacy');
+    expect(windowsOpenWithInstallerHookSource).toContain('ExecWait');
+    expect(windowsOpenWithInstallerHookSource).toContain('legacyNomoInstallPathConflict');
   });
 
   it('registers Nomo as an optional document open-with application', () => {
@@ -889,7 +898,7 @@ describe('App outline layout', () => {
     expect(titleBarSource).not.toContain('nomoAppIcon');
     expect(titleBarSource).not.toContain('class="app-logo"');
     expect(titleBarSource).not.toContain('<img class="app-logo"');
-    expect(titleBarSource).toContain('Nomo</span>');
+    expect(titleBarSource).toContain('>{t.appName()}</span>');
     expect(titleBarSource).not.toContain('<span class="app-logo">M</span>');
     expect(titleBarSource).toContain('t.showExplorerSidebar()');
     expect(titleBarSource).toContain('t.hideExplorerSidebar()');
@@ -916,8 +925,8 @@ describe('App outline layout', () => {
     expect(windowsCaptionControlsSource).not.toContain('currentWindow.destroy()');
     expect(windowsCaptionControlsSource).toContain('width: 46px;');
     expect(windowsCaptionControlsSource).toContain('height: 100%;');
-    expect(desktopWindowSource).toContain("title: 'Nomo'");
-    expect(desktopWindowSource).toContain('} - Nomo');
+    expect(desktopWindowSource).toContain("title: 'OpenTypo'");
+    expect(desktopWindowSource).toContain('} - OpenTypo');
     expect(desktopWindowSource).toContain('getNewWindowChromeOptions');
     expect(desktopWindowSource).toContain("titleBarStyle: 'overlay'");
     expect(desktopWindowSource).toContain('trafficLightPosition: new LogicalPosition(16, 24)');
@@ -1159,7 +1168,7 @@ describe('App outline layout', () => {
     expect(tauriMacosSource).toContain('NSUserDefaults');
     expect(tauriMacosSource).not.toContain('Command::new("defaults")');
     expect(settingsWindowSource).toContain('softwareUpdateUnsupportedMacos');
-    expect(settingsWindowSource).toContain('HOMEBREW_SETUP_COMMAND');
+    expect(settingsWindowSource).toContain('openProjectLink(GITHUB_RELEASES_URL)');
     expect(releaseWorkflowSource).toContain('update-homebrew-cask');
     expect(releaseWorkflowSource).toContain('Casks/nomo.rb');
     expect(existsSync(resolve(__dirname, '../../Casks/nomo.rb'))).toBe(true);
