@@ -81,19 +81,26 @@ export async function readEditorClipboard(
     return { kind: 'text', text };
   }
 
-  const { readImage, readText } = await import('@tauri-apps/plugin-clipboard-manager');
+  const { readText } = await import('@tauri-apps/plugin-clipboard-manager');
   if (preference === 'text') {
     return { kind: 'text', text: await readText().catch(() => '') };
   }
+  return await readNativeClipboardBitmap() ?? { kind: 'text', text: await readText() };
+}
+
+export async function readNativeClipboardBitmap(): Promise<Extract<ClipboardReadResult, { kind: 'image' }> | null> {
   try {
+    const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
     const image = await readImage();
-    const size = await image.size();
-    const rgba = await image.rgba();
-    const file = await rgbaToPngFile(rgba, size.width, size.height);
-    return { kind: 'image', files: [file] };
+    try {
+      const { width, height } = await image.size();
+      const file = await rgbaToPngFile(await image.rgba(), width, height);
+      return { kind: 'image', files: [file] };
+    } finally {
+      await image.close().catch(() => undefined);
+    }
   } catch {
-    const text = await readText();
-    return { kind: 'text', text };
+    return null;
   }
 }
 

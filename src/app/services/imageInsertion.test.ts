@@ -1,12 +1,14 @@
+import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
 import { describe, expect, it, vi } from 'vitest';
 import { createEditorCore } from '../../lib/editor-core/createEditorCore';
 import { DEFAULT_IMAGE_HANDLING_SETTINGS } from '../../lib/services/render';
 import { createImageInsertionHandlers } from './imageInsertion';
 
-const { importImage, resolveImage, invoke } = vi.hoisted(() => ({
+const { importImage, resolveImage, invoke, readImage } = vi.hoisted(() => ({
   importImage: vi.fn(async () => ({ markdownSrc: './assets/photo.png' })),
   resolveImage: vi.fn(async (src: string) => ({ src, displaySrc: 'https://asset.localhost/photo.png', exists: true })),
   invoke: vi.fn(),
+  readImage: vi.fn(),
 }));
 
 vi.mock('../../lib/editor-core/renderers', () => ({
@@ -17,6 +19,8 @@ vi.mock('@tauri-apps/api/core', async (load) => ({
   ...await load<typeof import('@tauri-apps/api/core')>(),
   invoke,
 }));
+
+vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({ readImage }));
 
 describe('image insertion Markdown policy', () => {
   it.each([true, false])('respects strict Markdown in source mode: %s', async (strictMarkdown) => {
@@ -110,8 +114,8 @@ it.each([true, false])(
   },
 );
 
-it.each(['native-list', 'untyped-file'])(
-  'pastes Explorer %s at the native caret and renders the imported image immediately',
+it.each(['native-list', 'untyped-file', 'web-bitmap', 'native-bitmap'])(
+  'pastes clipboard %s at the native caret and renders the imported image immediately',
   async (representation) => {
     const host = document.body.appendChild(document.createElement('div'));
     const editor = createEditorCore({
@@ -144,12 +148,33 @@ it.each(['native-list', 'untyped-file'])(
       throw new Error(command);
     });
 
-    const file = { name: 'photo.png', type: '', arrayBuffer: async () => Uint8Array.of(1, 2, 3).buffer };
+    const usesNativeBitmap = representation === 'native-bitmap';
+    const capture = representation === 'web-bitmap' || usesNativeBitmap;
+    const file = {
+      name: capture ? 'clipboard.png' : 'photo.png',
+      type: capture ? 'image/png' : '',
+      arrayBuffer: async () => Uint8Array.of(1, 2, 3).buffer,
+    };
+    const close = vi.fn(async () => undefined);
+    const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext');
+    const toBlob = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob');
+    if (usesNativeBitmap) {
+      readImage.mockResolvedValue({
+        size: async () => ({ width: 1, height: 1 }),
+        rgba: async () => Uint8Array.of(1, 2, 3, 255),
+        close,
+      });
+      context.mockReturnValue({ putImageData: vi.fn() } as unknown as CanvasRenderingContext2D);
+      toBlob.mockImplementation((callback) =>
+        callback(new NodeBlob([Uint8Array.of(1, 2, 3)], { type: 'image/png' }) as Blob));
+      vi.stubGlobal('ImageData', class {});
+      vi.stubGlobal('File', NodeFile);
+    }
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
       value: {
         types: ['Files'],
-        files: representation === 'untyped-file' ? [file] : [],
+        files: representation === 'untyped-file' || representation === 'web-bitmap' ? [file] : [],
         getData: () => '',
       },
     });
@@ -164,14 +189,16 @@ it.each(['native-list', 'untyped-file'])(
       host.querySelector('.ProseMirror')!.dispatchEvent(event);
       await handlers.awaitPendingInsertions();
 
-      expect(editor.getMarkdown()).toBe('First paragraph\n\nBefore ![photo.png](./assets/photo.png)after');
+      expect(editor.getMarkdown()).toBe(`First paragraph\n\nBefore ![${file.name}](./assets/photo.png)after`);
       expect(importImage).toHaveBeenLastCalledWith(
-        { fileName: 'photo.png', bytes: Uint8Array.of(1, 2, 3) },
+        { fileName: file.name, bytes: Uint8Array.of(1, 2, 3) },
         { documentPath: 'C:/docs/note.md' },
       );
       expect(resolveImage).toHaveBeenLastCalledWith('./assets/photo.png', { documentPath: 'C:/docs/note.md' });
       const image = host.querySelectorAll('.ProseMirror p')[1].querySelector('.image-node img');
       expect(image?.getAttribute('src')).toBe('https://asset.localhost/photo.png');
+      expect(readImage).toHaveBeenCalledTimes(usesNativeBitmap ? 1 : 0);
+      if (usesNativeBitmap) expect(close).toHaveBeenCalledOnce();
       if (representation === 'native-list') {
         expect(invoke).toHaveBeenCalledWith('read_file_as_base64', { input: { path: 'C:\\Pictures\\photo.png' } });
       }
@@ -180,6 +207,10 @@ it.each(['native-list', 'untyped-file'])(
       editor.destroy();
       host.remove();
       invoke.mockReset();
+      readImage.mockReset();
+      context.mockRestore();
+      toBlob.mockRestore();
+      vi.unstubAllGlobals();
     }
   },
 );

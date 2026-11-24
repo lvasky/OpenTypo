@@ -6,7 +6,7 @@ import { getSourceTextChanges, type MarkdownSourceEditorHandle, type MarkdownSou
 import { createPerfTimer, logError, logInfo } from '../../lib/services/logger';
 import { t } from '../i18n';
 import { createImageMarkdown, getImageFiles, type ImageImportFile } from './imageMarkdown';
-import { containsClipboardTable, readNativeClipboardPaste } from './clipboard';
+import { containsClipboardTable, readNativeClipboardBitmap, readNativeClipboardPaste } from './clipboard';
 import {
   getDelegatedImagePaste,
   mightHaveNativeImageFiles,
@@ -113,7 +113,8 @@ export function createImageInsertionHandlers(options: ImageInsertionOptions) {
     if (!options.getDesktopEnabled?.() || mode !== 'semantic') {
       return performImageInsertion(files, mode, target);
     }
-    const native = await readNativeClipboardPaste();
+    const native = await readNativeClipboardPaste()
+      ?? (files.length === 0 ? await readNativeClipboardBitmap() : null);
     if (options.isDocumentOpen?.() === false || options.getEditor() !== editor || options.getReadonly?.()) return;
     const current = editor.getSnapshot();
     if (options.getMode() !== 'semantic' ||
