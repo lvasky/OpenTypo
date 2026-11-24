@@ -2,7 +2,12 @@ import { serializeSourceChange } from './sourcePreservation';
 import { requiresHtmlCommand, strictMarkdownPaste } from './strictMarkdown';
 import { tableSourcePlugin } from './tableSource';
 import { createTableClipboardPayload } from './tableActions';
-import { delegateImagePaste } from './imagePasteEvents';
+import {
+  delegateImagePaste,
+  isImageFile,
+  mightHaveNativeImageFiles,
+  type ImageInsertionTarget,
+} from './imagePasteEvents';
 import { introducesUnsupportedTable } from './tableMarkdownSafety';
 import { t } from '../../app/i18n';
 import { serializeClipboardText } from './markdownSerialization';
@@ -1096,16 +1101,16 @@ export class ProseMirrorEditorCore implements EditorCore {
     }
     const clipboard = event.clipboardData;
     const plain = clipboard ? this.consumePlainTextPasteRequest() : false;
-    if (!plain && clipboard && clipboard.files.length > 0) {
-      if (!this.isTableClipboardSlice(slice) &&
-        !/<table[\s>]/i.test(clipboard.getData('text/html')) &&
-        Array.from(clipboard.files).some(file => file.type.startsWith('image/'))) {
-        // Stop ProseMirror from inserting the alternate bitmap before the outer
-        // handler can recover Excel's native HTML or import the actual image.
-        delegateImagePaste(event);
+    if (!plain && clipboard) {
+      const files = Array.from(clipboard.files ?? []);
+      const hasImages = files.some(isImageFile);
+      const couldHaveNativeFiles = mightHaveNativeImageFiles(clipboard);
+      if ((hasImages || couldHaveNativeFiles) && !this.isTableClipboardSlice(slice) &&
+          !/<table[\s>]/i.test(clipboard.getData('text/html'))) {
+        delegateImagePaste(event, this.captureImagePasteTarget());
         return true;
       }
-      if (!this.isTableClipboardSlice(slice)) return false;
+      if (files.length > 0 && !this.isTableClipboardSlice(slice)) return false;
     }
 
     const text = clipboard?.getData('text/plain') ?? '';
@@ -1185,6 +1190,32 @@ export class ProseMirrorEditorCore implements EditorCore {
     const result = this.pasteClipboard({ text, html }, { mode: plain ? 'plain' : 'auto' });
     event.preventDefault();
     return result.status === 'inserted' || result.reason === 'no-text';
+  }
+
+  private captureImagePasteTarget(): ImageInsertionTarget {
+    this.commitPendingEdits();
+    const view = this.view!;
+    const selection = view.state.selection;
+    let { anchor, head } = selection;
+    const native = view.dom.ownerDocument.getSelection();
+    // Selectionchange may still be queued when Ctrl+V reaches the editor.
+    if (selection instanceof TextSelection && native?.anchorNode && native.focusNode &&
+        view.dom.contains(native.anchorNode) && view.dom.contains(native.focusNode)) {
+      try {
+        const nativeAnchor = view.posAtDOM(native.anchorNode, native.anchorOffset);
+        const nativeHead = view.posAtDOM(native.focusNode, native.focusOffset);
+        const doc = view.state.doc;
+        if (nativeAnchor >= 0 && nativeAnchor <= doc.content.size &&
+            nativeHead >= 0 && nativeHead <= doc.content.size &&
+            doc.resolve(nativeAnchor).parent.inlineContent && doc.resolve(nativeHead).parent.inlineContent) {
+          anchor = nativeAnchor;
+          head = nativeHead;
+        }
+      } catch {
+        // Browser selection may briefly point into a detached NodeView.
+      }
+    }
+    return { selection: { anchor, head }, contentRevision: this.contentRevision };
   }
 
   private insertListClipboardShortcut(text: string): EditorPasteResult | null {

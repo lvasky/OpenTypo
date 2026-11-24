@@ -65,7 +65,7 @@
   export let deleteFrontMatter: () => void;
   export let updateActiveOutlineFromSourceScroll: () => void;
   export let updateActiveOutlineFromSemanticScroll: () => void;
-  export let handleEditorPaste: (event: ClipboardEvent) => void;
+  export let handleEditorPaste: (event: ClipboardEvent, pane?: SplitActivePane) => void;
   export let handleEditorDrop: (event: DragEvent) => void;
   export let handleWorkspaceContextMenu: (event: MouseEvent) => void;
   export let openContextMenu: (request: ContextMenuRequest) => void = () => undefined;
@@ -981,7 +981,7 @@
             editorGrid?.dispatchEvent(new Event('nomo:source-caret-change'));
           }}
           onLayoutChange={() => editorGrid?.dispatchEvent(new Event('nomo:source-layout-change'))}
-          onPaste={handleEditorPaste}
+          onPaste={(event) => handleEditorPaste(event, 'source')}
           onDrop={handleEditorDrop}
           onReady={handleSourceEditorReady}
           onScroll={() => {
@@ -1034,7 +1034,7 @@
         updateActiveOutlineFromSemanticScroll();
         onSemanticScroll?.();
       }}
-      on:paste={handleEditorPaste}
+      on:paste={(event) => handleEditorPaste(event, 'semantic')}
       on:drop={handleEditorDrop}
       on:dragover|preventDefault
       on:contextmenu={handleSemanticContextMenu}

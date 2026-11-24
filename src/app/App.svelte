@@ -5250,7 +5250,7 @@
     syncSourceTextareaHeight: () => syncSourceTextareaHeight(),
   });
   function handleEditorDrop(event: DragEvent) { (documentRuntimes.get(activeTabId)?.images ?? imageInsertion).handleEditorDrop(event); }
-  function handleEditorPaste(event: ClipboardEvent) { (documentRuntimes.get(activeTabId)?.images ?? imageInsertion).handleEditorPaste(event); }
+  function handleEditorPaste(event: ClipboardEvent, pane?: SplitActivePane) { (documentRuntimes.get(activeTabId)?.images ?? imageInsertion).handleEditorPaste(event, pane); }
   function updateMarkdown(nextMarkdown: string) {
     if (workspaceInteractionDisabled && !workspaceTransferFlushing) return;
     (documentRuntimes.get(activeTabId)?.interaction ?? editorInteraction).updateMarkdown(nextMarkdown);

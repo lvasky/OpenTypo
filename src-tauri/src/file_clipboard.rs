@@ -8,6 +8,7 @@ pub(crate) struct FileClipboard(Mutex<Option<arboard::Clipboard>>);
 pub(crate) struct ClipboardTextFormats {
     html: String,
     text: String,
+    image_paths: Vec<String>,
 }
 
 /// Read Excel's editable HTML representation before considering its alternate bitmap.
@@ -25,6 +26,15 @@ pub(crate) fn read_editor_clipboard_text(
         // An absent format is normal, e.g. when the user copied only a screenshot.
         html: clipboard.get().html().unwrap_or_default(),
         text: clipboard.get_text().unwrap_or_default(),
+        image_paths: clipboard
+            .get()
+            .file_list()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|path| path.is_absolute() && path.is_file()
+                && crate::file_system::image_assets::is_supported_image_file_path(path))
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect(),
     })
 }
 

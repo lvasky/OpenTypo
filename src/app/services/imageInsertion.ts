@@ -1,13 +1,17 @@
-import type { EditorCore, EditorMode, EditorSelectionSnapshot } from '../../lib/editor-core';
+import type { EditorCore, EditorMode } from '../../lib/editor-core';
 import { getImageLoader } from '../../lib/editor-core/renderers';
 import type { ImageContext } from '../../lib/services/render';
 import { Transaction } from '@codemirror/state';
 import { getSourceTextChanges, type MarkdownSourceEditorHandle, type MarkdownSourceRuntimeState } from '../components/markdownSourceEditor';
 import { createPerfTimer, logError, logInfo } from '../../lib/services/logger';
 import { t } from '../i18n';
-import { createImageMarkdown, getImageFiles } from './imageMarkdown';
-import { containsClipboardTable, readNativeClipboardTable } from './clipboard';
-import { isDelegatedImagePaste } from '../../lib/editor-core/imagePasteEvents';
+import { createImageMarkdown, getImageFiles, type ImageImportFile } from './imageMarkdown';
+import { containsClipboardTable, readNativeClipboardPaste } from './clipboard';
+import {
+  getDelegatedImagePaste,
+  mightHaveNativeImageFiles,
+  type ImageInsertionTarget,
+} from '../../lib/editor-core/imagePasteEvents';
 
 interface ImageInsertionOptions {
   getEditor(): EditorCore;
@@ -29,16 +33,22 @@ interface ImageInsertionOptions {
   syncSourceTextareaHeight(): void;
 }
 
-interface ImageInsertionTarget {
-  selection: EditorSelectionSnapshot;
-  contentRevision: number;
-}
-
 export function createImageInsertionHandlers(options: ImageInsertionOptions) {
   const pendingInsertions = new Set<Promise<void>>();
 
-  function insertImageFiles(files: File[], target?: ImageInsertionTarget): Promise<void> {
-    return trackInsertion(performImageInsertion(files, target), files.length);
+  function captureTarget(editor: EditorCore): ImageInsertionTarget | undefined {
+    const snapshot = editor.getSnapshot();
+    if (!snapshot.selection) return undefined;
+    return {
+      selection: snapshot.selection,
+      contentRevision: snapshot.contentRevision ?? snapshot.version,
+    };
+  }
+
+  function insertImageFiles(files: ImageImportFile[], target?: ImageInsertionTarget): Promise<void> {
+    const mode = options.getMode();
+    const insertionTarget = target ?? (mode === 'semantic' ? captureTarget(options.getEditor()) : undefined);
+    return trackInsertion(performImageInsertion(files, mode, insertionTarget), files.length);
   }
 
   function trackInsertion(insertion: Promise<void>, fileCount: number): Promise<void> {
@@ -76,52 +86,55 @@ export function createImageInsertionHandlers(options: ImageInsertionOptions) {
     void insertImageFiles(files);
   }
 
-  function handleEditorPaste(event: ClipboardEvent) {
-    // Plain-text paste, readonly handling and a successful HTML paste already
-    // own the event. Only explicitly delegated image pastes need more work.
-    if (event.defaultPrevented && !isDelegatedImagePaste(event)) return;
-    const files = getImageFiles(event.clipboardData?.files);
-    if (files.length === 0) {
-      return;
-    }
-    // Let the editor paste Excel's HTML table. Its alternate bitmap is not a
-    // second attachment, even when the same clipboard event reaches this shell.
-    if (containsClipboardTable(event.clipboardData?.getData('text/html') ?? '')) return;
+  function handleEditorPaste(event: ClipboardEvent, mode = options.getMode()) {
+    // Plain-text and table paste already own the event unless the editor delegated it.
+    const delegated = getDelegatedImagePaste(event);
+    if (event.defaultPrevented && !delegated) return;
+    const clipboard = event.clipboardData;
+    const files = getImageFiles(clipboard?.files);
+    const checkNative = options.getDesktopEnabled?.() && mode === 'semantic' &&
+      clipboard && mightHaveNativeImageFiles(clipboard);
+    if (!files.length && !checkNative) return;
+    if (containsClipboardTable(clipboard?.getData('text/html') ?? '')) return;
+    if (options.isDocumentOpen?.() === false || options.getReadonly?.()) return;
 
     event.preventDefault();
-    void trackInsertion(recoverTableOrInsertImages(files), files.length);
+    const editor = options.getEditor();
+    const target = mode === 'semantic' ? delegated ?? captureTarget(editor) : undefined;
+    void trackInsertion(recoverNativePaste(editor, files, mode, target), files.length);
   }
 
-  async function recoverTableOrInsertImages(files: File[]): Promise<void> {
-    if (!options.getDesktopEnabled?.() || options.getMode() !== 'semantic') {
-      return performImageInsertion(files);
+  async function recoverNativePaste(
+    editor: EditorCore,
+    files: ImageImportFile[],
+    mode: EditorMode,
+    target?: ImageInsertionTarget,
+  ): Promise<void> {
+    if (!options.getDesktopEnabled?.() || mode !== 'semantic') {
+      return performImageInsertion(files, mode, target);
     }
-    const editor = options.getEditor();
-    if (options.isDocumentOpen?.() === false || options.getReadonly?.()) return;
-    const snapshot = editor.getSnapshot();
-    const revision = snapshot.contentRevision ?? snapshot.version;
-    const table = await readNativeClipboardTable();
-    // Native reads are asynchronous; never paste into a closed/replaced document
-    // or overwrite text entered while that read was pending.
-    if (options.isDocumentOpen?.() === false || options.getEditor() !== editor) return;
+    const native = await readNativeClipboardPaste();
+    if (options.isDocumentOpen?.() === false || options.getEditor() !== editor || options.getReadonly?.()) return;
     const current = editor.getSnapshot();
-    if (options.getReadonly?.() || options.getMode() !== 'semantic' ||
-      (current.contentRevision ?? current.version) !== revision) {
+    if (options.getMode() !== 'semantic' ||
+        (target && (current.contentRevision ?? current.version) !== target.contentRevision)) {
       options.setStatusMessage(t.quickInsertSelectionChanged());
       return;
     }
-    if (snapshot.selection) editor.restoreSelectionSnapshot(snapshot.selection);
-    if (table) {
-      editor.pasteClipboard(table);
+    if (native?.kind === 'html') {
+      if (target) editor.restoreSelectionSnapshot(target.selection);
+      editor.pasteClipboard(native);
       return;
     }
-    return performImageInsertion(files, snapshot.selection ? {
-      selection: snapshot.selection,
-      contentRevision: revision,
-    } : undefined);
+    const images = native?.kind === 'image' ? native.files : files;
+    if (images.length) return performImageInsertion(images, mode, target);
   }
 
-  async function performImageInsertion(files: File[], target?: ImageInsertionTarget) {
+  async function performImageInsertion(
+    files: ImageImportFile[],
+    mode: EditorMode,
+    target?: ImageInsertionTarget,
+  ) {
     const timer = createPerfTimer('ImageInsertion', '插入图片');
     const editor = options.getEditor();
     const documentOpen = () => options.isDocumentOpen?.() !== false && options.getEditor() === editor;
@@ -170,6 +183,7 @@ export function createImageInsertionHandlers(options: ImageInsertionOptions) {
 
     const imported: Array<{ src: string; alt: string }> = [];
     let failed = 0;
+    let inserted = 0;
 
     for (const file of files) {
       try {
@@ -198,8 +212,9 @@ export function createImageInsertionHandlers(options: ImageInsertionOptions) {
       // 文件选择和资源导入期间光标可能移动，只在来源正文未变化时替换触发符号。
       if (cancelIfTargetChanged()) return;
       if (target) editor.restoreSelectionSnapshot(target.selection);
-      if (options.getMode() === 'source') {
+      if (mode === 'source') {
         insertSourceMarkdown(imported, editor);
+        inserted = imported.length;
       } else {
         for (const item of imported) {
           const imageSettings = context.settings;
@@ -207,25 +222,28 @@ export function createImageInsertionHandlers(options: ImageInsertionOptions) {
             imageSettings?.defaultImageAlign && imageSettings.defaultImageAlign !== 'none'
               ? imageSettings.defaultImageAlign
               : null;
-          editor.execute({
+          const success = editor.execute({
             type: 'insertImage',
             src: item.src,
             alt: item.alt,
             width: imageSettings?.defaultImageWidth || null,
             align: defaultAlign,
           });
+          if (success) inserted++;
+          else failed++;
         }
+        if (inserted) editor.flushMarkdown();
         if (options.isDocumentFocused?.() !== false) editor.focus();
       }
     }
 
     if (failed > 0) {
-      options.setStatusMessage(t.imagesInsertedWithFailures({ inserted: imported.length, failed }));
+      options.setStatusMessage(t.imagesInsertedWithFailures({ inserted, failed }));
     } else {
-      options.setStatusMessage(t.imagesInserted({ inserted: imported.length }));
+      options.setStatusMessage(t.imagesInserted({ inserted }));
     }
-    timer.end({ inserted: imported.length, failed });
-    logInfo('ImageInsertion', '图片插入完成', { inserted: imported.length, failed });
+    timer.end({ inserted, failed });
+    logInfo('ImageInsertion', '图片插入完成', { inserted, failed });
   }
 
   /** HTML 属性值转义：& " < > */
@@ -304,7 +322,7 @@ export function createImageInsertionHandlers(options: ImageInsertionOptions) {
     });
   }
 
-  function getInsertFileName(file: File, index: number) {
+  function getInsertFileName(file: ImageImportFile, index: number) {
     if (file.name?.trim()) {
       return file.name;
     }

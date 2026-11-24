@@ -1,7 +1,10 @@
+import { isImageFile } from '../../lib/editor-core/imagePasteEvents';
 import { serializeMarkdownLinkDestination } from '../../lib/editor-core/link';
 
+export type ImageImportFile = Pick<File, 'name' | 'arrayBuffer'>;
+
 export function getImageFiles(fileList: FileList | undefined | null) {
-  return Array.from(fileList ?? []).filter((file) => file.type.startsWith('image/'));
+  return Array.from(fileList ?? []).filter(isImageFile);
 }
 
 export function createImageMarkdownSrc(fileName: string, imageName: string) {

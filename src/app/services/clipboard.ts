@@ -1,8 +1,10 @@
 import type { EditorClipboardPayload } from '../../lib/editor-core';
+import { readFileAsBase64 } from '../../lib/desktop/tauriStorage';
+import type { ImageImportFile } from './imageMarkdown';
 
 export type ClipboardReadResult =
   | { kind: 'html'; html: string; text: string }
-  | { kind: 'image'; files: File[] }
+  | { kind: 'image'; files: ImageImportFile[] }
   | { kind: 'text'; text: string };
 
 export type ClipboardReadPreference = 'rich' | 'text';
@@ -68,8 +70,9 @@ export async function readEditorClipboard(
   // the existing native clipboard first, rather than falling straight to readImage.
   const native = desktopEnabled ? await tryReadNativeClipboardText() : null;
   if (preference === 'text' && native?.text) return { kind: 'text', text: native.text };
-  if (preference === 'rich' && native && containsClipboardTable(native.html)) {
-    return { kind: 'html', html: native.html, text: native.text };
+  if (preference === 'rich' && native) {
+    const preferred = nativeClipboardPaste(native);
+    if (preferred) return preferred;
   }
   const webResult = await tryReadWebClipboard(preference);
   if (webResult) return webResult;
@@ -94,10 +97,16 @@ export async function readEditorClipboard(
   }
 }
 
-async function tryReadNativeClipboardText(): Promise<{ html: string; text: string } | null> {
+interface NativeClipboardFormats {
+  html: string;
+  text: string;
+  image_paths?: string[];
+}
+
+async function tryReadNativeClipboardText(): Promise<NativeClipboardFormats | null> {
   try {
     const { invoke } = await import('@tauri-apps/api/core');
-    const result = await invoke<{ html: string; text: string }>('read_editor_clipboard_text');
+    const result = await invoke<NativeClipboardFormats>('read_editor_clipboard_text');
     return { ...result, html: restoreClipboardTableEnvelope(result.html) };
   } catch {
     // Keep the existing Web Clipboard / image-only fallback available.
@@ -105,10 +114,22 @@ async function tryReadNativeClipboardText(): Promise<{ html: string; text: strin
   }
 }
 
-/** Ctrl+V can expose a PNG File while hiding Excel's native HTML from DataTransfer. */
-export async function readNativeClipboardTable(): Promise<{ html: string; text: string } | null> {
+function nativeClipboardPaste(native: NativeClipboardFormats): ClipboardReadResult | null {
+  if (containsClipboardTable(native.html)) return { kind: 'html', html: native.html, text: native.text };
+  const files = native.image_paths?.map((path) => ({
+    name: path.split(/[\\/]/).at(-1) || 'image.png',
+    async arrayBuffer() {
+      const { data_url } = await readFileAsBase64(path);
+      return (await fetch(data_url)).arrayBuffer();
+    },
+  }));
+  return files?.length ? { kind: 'image', files } : null;
+}
+
+/** Recover editable Excel HTML or Explorer image files from the native clipboard. */
+export async function readNativeClipboardPaste(): Promise<ClipboardReadResult | null> {
   const native = await tryReadNativeClipboardText();
-  return native && containsClipboardTable(native.html) ? native : null;
+  return native ? nativeClipboardPaste(native) : null;
 }
 
 async function tryReadWebClipboard(

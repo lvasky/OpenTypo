@@ -544,7 +544,7 @@ fn ensure_path_stays_in_document_dir(document_dir: &Path, image_path: &Path) -> 
     }
 }
 
-fn is_supported_image_file_path(path: &Path) -> bool {
+pub(crate) fn is_supported_image_file_path(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
         .map(|extension| {
