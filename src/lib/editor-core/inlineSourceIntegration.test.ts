@@ -50,6 +50,36 @@ describe('inline source editor integration', () => {
     }
   });
 
+  it.each([
+    ['[label](./a)', 'label', '[label](./b)', 'a[href="./b"]'],
+    ['![image](./a.png)', 'image', '![image](./b.png)', '.image-node'],
+    ['note [^1]', 'footnote_ref', '[^2]', '.footnote-ref[data-footnote-id="2"]'],
+    ['[^1]: definition', 'footnote_def', '[^2]:', '.footnote-def[data-footnote-id="2"]'],
+  ])('reveals and edits the source for %s at the caret', async (source, targetText, replacement, selector) => {
+    const { editor, view, target, destroy } = setup(source);
+    try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      let pos = 0;
+      view.state.doc.descendants((node, at) => {
+        if (node.isText && node.text === targetText) pos = at + 1;
+        if (node.type.name === targetText || (targetText === 'image' && node.type.name === 'image')) {
+          pos = node.isTextblock ? at + 1 : at;
+        }
+      });
+      view.focus();
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)));
+      const input = target.querySelector<HTMLInputElement>('.pm-markdown-source-widget input');
+      expect(input).not.toBeNull();
+      input!.focus();
+      input!.value = replacement;
+      input!.blur();
+      expect(target.querySelector(selector)).not.toBeNull();
+      expect(editor.flushMarkdown()).toContain(replacement);
+    } finally {
+      destroy();
+    }
+  });
+
   it('retains every delimiter caret position and deletes just one asterisk', () => {
     const { editor, view, destroy } = setup('**正文**');
     for (let position = 1; position <= 7; position++) {

@@ -251,7 +251,7 @@ export interface EditorCore {
   getSelectionStatsSnapshot(): EditorSelectionSnapshot | null;
   mount(target: HTMLElement): void;
   /** 提交 NodeView 临时输入，刷新正文，但保留文档编辑历史。 */
-  commitPendingEdits(): void;
+  commitPendingEdits(manualSave?: boolean): void;
   /** Background polling must not confirm a new formula on the user's behalf. */
   hasPendingMathInlineDraft?(): boolean;
   /** 保存等待正文输入法提交，避免清理空模板或落盘半次组字。 */

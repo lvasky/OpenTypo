@@ -449,7 +449,7 @@ describe('markdown input rules', () => {
     '\\[scurve](./scurve)',
     '[scurve](javascript:alert(1))',
     '`[scurve](./scurve)`',
-    '![scurve](./scurve)',
+    '!\\[scurve](./scurve)',
   ])('leaves %s outside the Markdown link input rule', (text) => {
     const { target, view } = createInputRuleView();
 
@@ -457,6 +457,24 @@ describe('markdown input rules', () => {
       typeText(view, text);
       expect(target.querySelector('a')).toBeNull();
       expect(view.state.doc.textContent).toBe(text);
+    } finally {
+      view.destroy();
+      target.remove();
+    }
+  });
+
+  it.each([
+    ['![](./image.png)', 'image'],
+    ['[^1]', 'footnote_ref'],
+    ['[^1]: definition', 'footnote_def'],
+  ])('renders %s as the user types', (source, nodeName) => {
+    const { target, view } = createInputRuleView();
+    try {
+      typeText(view, source);
+      let found = false;
+      view.state.doc.descendants((node) => { found ||= node.type.name === nodeName; });
+      expect(found).toBe(true);
+      expect(serializeMarkdown(view.state.doc)).toBe(source);
     } finally {
       view.destroy();
       target.remove();

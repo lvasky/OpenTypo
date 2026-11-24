@@ -2403,3 +2403,33 @@
 .prosemirror-host .details-menu button:hover,
 .prosemirror-host .details-menu button:focus-visible { background: var(--md-editor-border); }
 .prosemirror-host .details-default-open[aria-checked="true"]::before { content: '✓ '; }
+
+.pm-markdown-source-widget {
+  position: relative;
+  display: inline-block;
+  inline-size: 0;
+  block-size: 0;
+  z-index: 5;
+}
+
+.pm-markdown-source-widget input {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-end: 0.9em;
+  box-sizing: border-box;
+  inline-size: min(28rem, 42vw);
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--md-editor-border);
+  border-radius: 4px;
+  background: var(--md-editor-bg);
+  color: var(--md-editor-fg);
+  font: 0.9em monospace;
+}
+
+.pm-markdown-source-widget.is-below input {
+  inset-block: 0.4em auto;
+}
+
+.ProseMirror[contenteditable='false'] .pm-markdown-source-widget {
+  display: none;
+}

@@ -6,6 +6,7 @@ import { createEditorCore, setCodeBlockDiagramRenderer } from './createEditorCor
 import { DIAGRAM_TEMPLATES } from './diagramTemplates';
 import { executeEditorCommand } from './editorCommands';
 import { parseMarkdown, serializeMarkdown } from './markdown';
+import { commitActiveEdit } from './nodeViews/activeEditRegistry';
 import { MermaidBlockNodeView } from './nodeViews/MermaidBlockNodeView';
 import { schema } from './schema';
 
@@ -246,7 +247,7 @@ describe('MermaidBlockNodeView', () => {
     target.remove();
   });
 
-  it('debounces edit-mode Mermaid preview rendering and uses the latest source', async () => {
+  it('renders Mermaid after editing ends and retains the textarea on background commits', async () => {
     vi.useFakeTimers();
     const renderCalls: string[] = [];
     setCodeBlockDiagramRenderer({
@@ -281,10 +282,12 @@ describe('MermaidBlockNodeView', () => {
     textarea!.value = 'flowchart TD\n  A --> D';
     textarea!.dispatchEvent(new Event('input', { bubbles: true }));
 
-    vi.advanceTimersByTime(249);
+    vi.advanceTimersByTime(1000);
+    commitActiveEdit(view);
+    expect(target.querySelector('.mermaid-block-textarea')).toBe(textarea);
     expect(renderCalls).toHaveLength(1);
 
-    vi.advanceTimersByTime(1);
+    commitActiveEdit(view, false, true);
     await Promise.resolve();
 
     expect(renderCalls).toEqual(['flowchart TD\n  A --> B', 'flowchart TD\n  A --> D']);

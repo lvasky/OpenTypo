@@ -324,12 +324,12 @@ export class ImageNodeView {
       this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, attrs));
     };
 
-    const removeNode = () => {
+    const removeNode = (deleteFile: boolean) => {
       if (!this.view.editable || this.view.isDestroyed) return;
       const pos = this.getPos();
       if (pos === undefined || this.view.state.doc.nodeAt(pos) !== this.node) return;
       const tr = this.view.state.tr.delete(pos, pos + this.node.nodeSize);
-      if (canRequestLocalFileDeletion()) tr.setMeta(IMAGE_FILE_DELETE_META, true);
+      tr.setMeta(IMAGE_FILE_DELETE_META, deleteFile && canRequestLocalFileDeletion());
       this.view.dispatch(tr);
     };
 
@@ -396,12 +396,19 @@ export class ImageNodeView {
       // 危险操作
       { label: '', separator: true },
       {
-        label: canRequestLocalFileDeletion() ? t.deleteImageAndLocalFile() : t.deleteAction(),
+        label: t.deleteAction(),
         icon: 'delete',
         disabled,
-        action: removeNode,
+        action: () => removeNode(false),
         danger: true,
       },
+      ...(canRequestLocalFileDeletion() ? [{
+        label: t.deleteImageAndLocalFile(),
+        icon: 'delete' as const,
+        disabled,
+        action: () => removeNode(true),
+        danger: true,
+      }] : []),
     ];
   }
 

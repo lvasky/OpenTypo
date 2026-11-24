@@ -159,9 +159,9 @@ export function createDocumentActionsController(options: DocumentActionsOptions)
     return core;
   }
 
-  async function prepareDocumentSave(tabId: string) {
+  async function prepareDocumentSave(tabId: string, manualSave = false) {
     await getDocumentEditor(tabId)?.awaitCompositionEnd?.();
-    getDocumentEditor(tabId)?.commitPendingEdits?.();
+    getDocumentEditor(tabId)?.commitPendingEdits?.(manualSave);
     return flushDocumentRuntime(tabId);
   }
 
@@ -286,7 +286,7 @@ export function createDocumentActionsController(options: DocumentActionsOptions)
       return false;
     }
 
-    const core = await prepareDocumentSave(targetTabId);
+    const core = await prepareDocumentSave(targetTabId, true);
     const currentMarkdown = core?.getMarkdown() ?? activeTab.markdown;
     activeTab.markdown = currentMarkdown;
     const markdownToSave = currentMarkdown;

@@ -969,7 +969,8 @@ export function createMarkdownInputRules() {
       return state.tr.replaceWith($start.before(), $start.after(),
         schema.nodes.toc_block.create({ sourceMarker: '[TOC]' }));
     }),
-    createMarkdownLinkInputRule(),
+    createFootnoteDefinitionInputRule(),
+    createMarkdownInlineInputRule(),
     createMathInlineInputRule(),
     textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, (match) => ({
       level: match[1].length,
@@ -980,38 +981,61 @@ export function createMarkdownInputRules() {
   ];
 }
 
-function createMarkdownLinkInputRule(): InputRule {
-  // The input-rules plugin limits this context to its last 500 characters.
-  return new InputRule(/(?:^|(?<=[\n\ufffc]))[^\n\ufffc]*\]\([^\n\ufffc]*\)$/, (state, match, start, end) => {
+function createFootnoteDefinitionInputRule(): InputRule {
+  return new InputRule(/^\ufffc:$/, (state, _match, start, end) => {
     const $start = state.doc.resolve(start);
+    const paragraph = $start.parent;
+    const ref = paragraph.firstChild;
+    if (paragraph.type !== schema.nodes.paragraph || paragraph.childCount !== 1 ||
+        ref?.type !== schema.nodes.footnote_ref || start !== $start.start() || end !== $start.end()) return null;
+    const container = $start.node(-1);
+    const index = $start.index(-1);
+    if (!container.canReplaceWith(index, index + 1, schema.nodes.footnote_def)) return null;
+    const tr = state.tr.replaceWith($start.before(), $start.after(), schema.nodes.footnote_def.create(ref.attrs));
+    return tr.setSelection(TextSelection.create(tr.doc, $start.before() + 1));
+  });
+}
+
+function createMarkdownInlineInputRule(): InputRule {
+  // The input-rules plugin only supplies the last 500 characters. Inspect the
+  // current text run so long destinations and earlier escapes are recognized.
+  return new InputRule(/[)\]]$/, (state, match, start, end) => {
     const $end = state.doc.resolve(end);
-    const block = $start.parent;
+    const block = $end.parent;
+    const $start = state.doc.resolve(start);
     if (!$start.sameParent($end) || !isInlineSourceBlock(block)) return null;
 
-    const source = match[0];
-    const tokens = markdownIt.parseInline(source, {})[0]?.children ?? [];
-    const close = tokens.at(-1);
-    if (close?.type !== 'link_close' || inlineTokenSourceRange(close)?.to !== source.length)
-      return null;
-    const open = tokens[findLastIndex(tokens, (token) => token.type === 'link_open')];
-    const range = open && inlineTokenSourceRange(open);
-    if (!range || source[range.from] !== '[' || !normalizeLinkHref(open.attrGet('href'))) return null;
-
-    const from = start + range.from;
-    if (from > Math.min(end, state.selection.from)) return null;
-    const blockStart = $start.start();
-    const fromOffset = from - blockStart;
+    const blockStart = $end.start();
     const toOffset = end - blockStart;
+    const typed = match[0].at(-1)!;
+    const context = block.textBetween(0, $start.parentOffset, '', '\ufffc');
+    const contextStart = context.lastIndexOf('\ufffc') + 1;
+    const source = context.slice(contextStart) + typed;
+    if (!(typed === ']' ? source.includes('[^') : source.includes(']('))) return null;
+    const tokens = markdownIt.parseInline(source, {})[0]?.children ?? [];
+    const last = tokens.at(-1);
+    if (!last || inlineTokenSourceRange(last)?.to !== source.length) return null;
+
+    const token = last.type === 'link_close'
+      ? tokens[findLastIndex(tokens, (part) => part.type === 'link_open')]
+      : last;
+    if (!token || !['link_open', 'image', 'footnote_ref'].includes(token.type)) return null;
+    const range = inlineTokenSourceRange(token);
+    if (!range || !/^(?:!?\[)/.test(source.slice(range.from)) ||
+        (token.type === 'link_open' && !normalizeLinkHref(token.attrGet('href')))) return null;
+
+    const fromOffset = contextStart + range.from;
+    const from = blockStart + fromOffset;
+    if (from > start) return null;
     if (analyzeInlineSource(block).spans.some(
       (span) => span.type === 'code' && fromOffset < span.closeTo && toOffset > span.openFrom,
     )) return null;
 
-    // Do not convert a link while the user is still typing its enclosing code span.
     for (const marker of source.slice(0, range.from).matchAll(/\\.|`+/g)) {
       if (marker[0][0] !== '`') continue;
-      const isClosedCode = tokens.some((token) => {
-        if (token.type !== 'code_inline' && token.type !== 'inline_source_code') return false;
-        const code = inlineTokenSourceRange(token);
+      const isClosedCode = tokens.some((part) => {
+        if (part.type !== 'code_inline' && part.type !== 'inline_source_code') return false;
+        const code = inlineTokenSourceRange(part);
         return code && marker.index >= code.from && marker.index < code.to;
       });
       if (!isClosedCode) return null;
@@ -1025,11 +1049,10 @@ function createMarkdownLinkInputRule(): InputRule {
     });
     if (!canReplace) return null;
 
-    const link = tryParseMarkdown(source.slice(range.from))?.firstChild;
-    if (link?.type !== schema.nodes.paragraph ||
-        !link.rangeHasMark(0, link.content.size, schema.marks.link)) return null;
-    const next = block.content.cut(0, fromOffset).append(link.content).append(block.content.cut(toOffset));
-    return block.type.validContent(next) ? state.tr.replaceWith(from, end, link.content) : null;
+    const parsed = tryParseMarkdown(source.slice(range.from))?.firstChild;
+    if (parsed?.type !== schema.nodes.paragraph || !parsed.content.size) return null;
+    const next = block.content.cut(0, fromOffset).append(parsed.content).append(block.content.cut(toOffset));
+    return block.type.validContent(next) ? state.tr.replaceWith(from, end, parsed.content) : null;
   }, { inCodeMark: false });
 }
 

@@ -23,7 +23,6 @@ export class MathBlockNodeView {
   private view: EditorView;
   private getPos: () => number;
   private renderId = 0;
-  private previewRenderId = 0;
 
   // 编辑态相关
   private editing = false;
@@ -31,7 +30,6 @@ export class MathBlockNodeView {
   private readonly activeEditExitFn = () => this.exitEdit(true, 'preserve');
   private originalTex = '';
   private textarea: HTMLTextAreaElement | null = null;
-  private previewEl: HTMLElement | null = null;
   private composing = false;
   private compositionEndTimer: number | null = null;
   private compositionWaiters = new Set<() => void>();
@@ -75,7 +73,7 @@ export class MathBlockNodeView {
     if (node.type !== this.node.type) return false;
     const texChanged = node.attrs.tex !== this.node.attrs.tex;
     this.node = node;
-    if (this.editing && texChanged) {
+    if (this.editing && texChanged && node.attrs.tex !== this.originalTex) {
       // 撤销或外部事务更新内容后结束旧缓冲，不能再把旧输入写回文档。
       this.cleanupEdit();
     } else if (!this.editing) {
@@ -162,7 +160,8 @@ export class MathBlockNodeView {
   private enterEdit(caret: 'start' | 'end' = 'start'): void {
     if (this.editing || this.destroyed || this.view.isDestroyed || !this.view.editable) return;
 
-    registerActiveEdit(this.view, this.activeEditExitFn, undefined, {
+    registerActiveEdit(this.view, this.activeEditExitFn, () => this.commitContent(), {
+      exitOnManualSave: true,
       isComposing: () => this.composing,
       waitForCompositionEnd: () => this.waitForCompositionEnd(),
     });
@@ -173,7 +172,7 @@ export class MathBlockNodeView {
     this.dom.classList.add('is-editing');
     this.dom.classList.remove('ProseMirror-selectednode');
 
-    // 步骤1：清空 dom，构建编辑态布局（textarea + 预览区）
+    // 输入期间让 textarea 独占编辑区，提交后再渲染。
     this.dom.textContent = '';
 
     // textarea 编辑区
@@ -184,17 +183,10 @@ export class MathBlockNodeView {
     this.textarea.spellcheck = false;
     this.dom.appendChild(this.textarea);
 
-    // 预览区（在公式块内部，不用 fixed 浮层）
-    this.previewEl = document.createElement('div');
-    this.previewEl.className = 'math-block-preview';
-    this.dom.appendChild(this.previewEl);
-
-    // 步骤2：textarea 事件监听
     const textarea = this.textarea;
     textarea.addEventListener('input', () => {
       if (this.textarea !== textarea) return;
       this.autoResizeTextarea();
-      this.updatePreview();
     });
     textarea.addEventListener('compositionstart', () => {
       if (this.textarea !== textarea || !this.view.editable) return;
@@ -218,13 +210,9 @@ export class MathBlockNodeView {
     });
     textarea.addEventListener('blur', () => {
       // 点击外部保存退出
-      if (this.textarea === textarea) this.exitEdit(true);
+      if (this.textarea === textarea) this.exitEdit(true, 'preserve');
     });
 
-    // 步骤3：初始预览渲染
-    this.updatePreview();
-
-    // 步骤4：聚焦 textarea
     requestAnimationFrame(() => {
       if (this.textarea !== textarea || !this.view.editable) return;
       textarea.focus({ preventScroll: true });
@@ -287,6 +275,17 @@ export class MathBlockNodeView {
     return entry.caret;
   }
 
+  private commitContent(): void {
+    const pos = this.getPos();
+    const node = typeof pos === 'number' ? this.view.state.doc.nodeAt(pos) : null;
+    if (!this.textarea || !this.view.editable || node?.type !== this.node.type) return;
+    const tex = this.textarea.value;
+    this.originalTex = tex;
+    if (tex !== node.attrs.tex) {
+      this.view.dispatch(this.view.state.tr.setNodeAttribute(pos, 'tex', tex));
+    }
+  }
+
   private exitEdit(
     save: boolean,
     selection: 'node' | 'before' | 'after' | 'preserve' = 'node',
@@ -313,7 +312,7 @@ export class MathBlockNodeView {
     }
     const oldTex = currentNode.attrs.tex as string;
 
-    this.cleanupEdit();
+    this.cleanupEdit(!save || newTex === oldTex);
 
     let tr = this.view.state.tr;
     if (save && newTex !== oldTex) {
@@ -351,20 +350,17 @@ export class MathBlockNodeView {
     this.compositionWaiters.clear();
   }
 
-  private cleanupEdit(): void {
+  private cleanupEdit(render = true): void {
     this.editing = false;
     this.deferredExit = null;
     if (this.compositionEndTimer !== null) window.clearTimeout(this.compositionEndTimer);
     this.compositionEndTimer = null;
     this.finishComposition();
-    this.previewRenderId += 1;
     unregisterActiveEdit(this.view, this.activeEditExitFn);
     this.dom.classList.remove('is-editing');
     this.textarea = null;
-    this.previewEl = null;
 
-    // 恢复 KaTeX 渲染
-    this.renderKaTeX();
+    if (render) void this.renderKaTeX();
   }
 
   // ---- 键盘处理 ----
@@ -476,37 +472,5 @@ export class MathBlockNodeView {
   private autoResizeTextarea(): void {
     if (!this.textarea) return;
     this.textarea.rows = Math.max(2, this.textarea.value.split('\n').length);
-  }
-
-  private async updatePreview(): Promise<void> {
-    if (!this.previewEl || !this.textarea) return;
-
-    const id = ++this.previewRenderId;
-    const tex = this.textarea.value.trim();
-    if (!tex) {
-      this.previewEl.textContent = '';
-      return;
-    }
-
-    const mathRenderer = getMathRenderer();
-    if (!mathRenderer) {
-      this.previewEl.textContent = '(math renderer unavailable)';
-      return;
-    }
-
-    try {
-      const result = await mathRenderer.render(tex, { displayMode: true });
-      if (id !== this.previewRenderId || !this.editing || !this.previewEl || this.destroyed) return;
-      if (result.error) {
-        this.previewEl.textContent = result.error;
-        this.previewEl.style.color = 'var(--md-editor-warning)';
-      } else {
-        this.previewEl.innerHTML = result.html;
-        this.previewEl.style.color = '';
-      }
-    } catch {
-      if (id !== this.previewRenderId || !this.editing || !this.previewEl || this.destroyed) return;
-      this.previewEl.textContent = 'KaTeX error';
-    }
   }
 }

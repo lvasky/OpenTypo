@@ -74,32 +74,36 @@ describe('ImageNodeView', () => {
     const target = document.body.appendChild(document.createElement('div'));
     const deleted: EditorImageDeletionEvent[] = [];
     const editor = createEditorCore({
-      markdown: '![first](./assets/a.png)\n\n![second](assets/a.png)',
+      markdown: '![first](./assets/a.png)\n\n![second](assets/a.png)\n\n![keep](./assets/keep.png)',
       target,
       getImageContext: () => ({ documentPath: 'C:/docs/note.md' }),
       onImagesDeleted: (event) => deleted.push(event),
     });
-    let action: ContextMenuItem['action'];
+    let actions: ContextMenuItem[] = [];
     target.addEventListener('image-context-menu', (event) => {
       const { items } = (event as CustomEvent<{ items: ContextMenuItem[] }>).detail;
-      action = items.find((item) => item.icon === 'delete')?.action;
+      actions = items.filter((item) => item.icon === 'delete');
     });
-    const deleteImage = (index: number) => {
+    const deleteImage = (index: number, deleteFile: boolean) => {
       target.querySelectorAll('.image-node')[index].dispatchEvent(
         new MouseEvent('contextmenu', { bubbles: true, cancelable: true }),
       );
-      expect(action).toBeTypeOf('function');
-      action?.();
+      expect(actions).toHaveLength(2);
+      actions[deleteFile ? 1 : 0].action?.();
     };
 
     try {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      deleteImage(1);
+      deleteImage(2, false);
+      expect(editor.getMarkdown()).not.toContain('keep.png');
+      expect(deleted).toEqual([]);
+
+      deleteImage(1, true);
       expect(editor.getMarkdown()).toContain('![first](./assets/a.png)');
       expect(editor.getMarkdown()).not.toContain('second');
       expect(deleted).toEqual([]);
 
-      deleteImage(0);
+      deleteImage(0, true);
       expect(editor.getMarkdown()).not.toContain('assets/a.png');
       expect(deleted).toEqual([{ srcs: ['./assets/a.png'], deleteFile: true }]);
     } finally {

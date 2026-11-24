@@ -28,7 +28,6 @@ import {
 export class MermaidBlockNodeView {
   private static instances = new Set<MermaidBlockNodeView>();
   private static currentTheme: MermaidThemeDefinition = { theme: 'default' };
-  private static readonly PREVIEW_DEBOUNCE_MS = 250;
 
   dom: HTMLElement;
 
@@ -36,13 +35,15 @@ export class MermaidBlockNodeView {
   private view: EditorView;
   private getPos: () => number;
   private renderId = 0;
-  private renderedCode: string | null = null;
   private pendingRender: Promise<void> | null = null;
   private cancelPendingRender: (() => void) | null = null;
-  private previewRenderId = 0;
-  private previewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private editing = false;
   private readonly activeEditExitFn = () => this.exitEdit(true, 'preserve');
+  private composing = false;
+  private compositionDone: Promise<void> = Promise.resolve();
+  private finishComposition = () => {};
+  private compositionEndTimer: number | undefined;
+  private pendingBlur = false;
   private originalCode = '';
   private textarea: HTMLTextAreaElement | null = null;
   private previewEl: HTMLElement | null = null;
@@ -98,8 +99,6 @@ export class MermaidBlockNodeView {
       this.closeFullscreen();
       if (!this.editing) {
         void this.renderMermaid();
-      } else {
-        void this.updatePreview();
       }
     });
     this.renderMermaid();
@@ -112,9 +111,7 @@ export class MermaidBlockNodeView {
     for (const instance of MermaidBlockNodeView.instances) {
       // 立即作废旧请求，即便节点在屏幕外也不能让旧异步结果覆盖新主题。
       instance.renderId += 1;
-      instance.previewRenderId += 1;
       instance.clearPendingRender();
-      instance.renderedCode = null;
       instance.themeDirty = true;
       if (instance.themeVisible) void instance.applyPendingTheme();
     }
@@ -131,10 +128,6 @@ export class MermaidBlockNodeView {
 
   private async flushPendingRender(): Promise<void> {
     while (!this.destroyed) {
-      if (this.editing && this.previewDebounceTimer !== null) {
-        this.clearPreviewDebounce();
-        void this.updatePreview();
-      }
       const render = this.applyPendingTheme(true);
       if (!render) return;
       await render;
@@ -143,11 +136,11 @@ export class MermaidBlockNodeView {
 
   /** 只读取最新主题；连续切换时屏幕外节点不积累中间主题的渲染任务。 */
   private applyPendingTheme(force = false): Promise<void> | null {
-    if (this.destroyed) return null;
+    if (this.destroyed || this.editing) return null;
     if (!this.themeDirty) return this.pendingRender;
-    if (!force && !this.themeVisible && !this.editing) return this.pendingRender;
+    if (!force && !this.themeVisible) return this.pendingRender;
     this.themeDirty = false;
-    return this.editing ? this.updatePreview() : this.renderMermaid(force);
+    return this.renderMermaid(force);
   }
 
   private clearPendingRender(): void {
@@ -217,14 +210,13 @@ export class MermaidBlockNodeView {
     } else if (codeChanged) {
       this.dom.setAttribute('data-code', node.attrs.code as string);
       if (this.editing && this.textarea) {
+        if (node.attrs.code === this.originalCode) return true;
         // 自身提交先结束编辑再 dispatch；仍处于编辑态的变化来自撤销或外部更新。
         const { selectionStart, selectionEnd, selectionDirection } = this.textarea;
         this.originalCode = node.attrs.code as string;
         this.textarea.value = this.originalCode;
         this.textarea.setSelectionRange(selectionStart, selectionEnd, selectionDirection);
         this.autoResizeTextarea();
-        this.clearPreviewDebounce();
-        void this.updatePreview();
       } else {
         // 焦点和选区事务不应重建查看器，否则全屏打开后会立即被销毁。
         void this.renderMermaid();
@@ -265,7 +257,6 @@ export class MermaidBlockNodeView {
     this.clearPendingRender();
     this.themeDirty = false;
     this.renderId += 1;
-    this.previewRenderId += 1;
     this.disposeFullscreen();
     this.cleanupEdit();
     this.unsubscribeLocale();
@@ -282,7 +273,6 @@ export class MermaidBlockNodeView {
     if (!code.trim()) {
       this.dom.style.removeProperty('min-height');
       this.renderEmptyDiagram();
-      this.renderedCode = code;
       return Promise.resolve();
     }
 
@@ -298,7 +288,6 @@ export class MermaidBlockNodeView {
     if (!renderer) {
       this.disposeFullscreen();
       this.dom.textContent = `\`\`\`mermaid\n${code}\n\`\`\``;
-      this.renderedCode = code;
       return Promise.resolve();
     }
 
@@ -313,25 +302,25 @@ export class MermaidBlockNodeView {
           if (result.error) this.renderError(result.error, code);
           else this.renderDisplayDiagram(normalizeMermaidSvgSize(result.svg));
         });
-        this.renderedCode = code;
       } catch (error) {
         if (this.destroyed || this.view.isDestroyed || this.editing || id !== this.renderId) return;
         this.renderError(error instanceof Error ? error.message : t.mermaidRenderFailed(), code);
-        this.renderedCode = code;
       }
     })());
   }
 
   private enterEdit(caret: 'start' | 'end' = 'start'): boolean {
     if (!this.view.editable || this.editing || this.destroyed || this.view.isDestroyed) return false;
-    registerActiveEdit(this.view, this.activeEditExitFn);
+    registerActiveEdit(this.view, this.activeEditExitFn, () => this.commitContent(), {
+      exitOnManualSave: true,
+      isComposing: () => this.composing,
+      waitForCompositionEnd: () => this.compositionDone,
+    });
     this.editing = true;
     this.renderId += 1;
-    this.previewRenderId += 1;
     this.clearPendingRender();
     this.disposeFullscreen();
     this.originalCode = this.node.attrs.code as string;
-    const snapshotCurrent = this.renderedCode === this.originalCode;
     this.previewSnapshotEl = this.takeRenderedPreviewSnapshot('mermaid-block-preview-snapshot');
     this.dom.classList.add('is-editing');
     this.dom.classList.remove('ProseMirror-selectednode');
@@ -355,11 +344,20 @@ export class MermaidBlockNodeView {
       if (this.previewEl.querySelector('svg')) this.bindPreviewViewport();
     }
 
-    if (!this.previewSnapshotEl || !snapshotCurrent) void this.updatePreview();
-
     this.textarea.addEventListener('input', () => {
       this.autoResizeTextarea();
-      this.schedulePreviewUpdate();
+    });
+    this.textarea.addEventListener('compositionstart', () => {
+      if (this.composing) window.clearTimeout(this.compositionEndTimer);
+      else this.compositionDone = new Promise<void>((resolve) => { this.finishComposition = resolve; });
+      this.composing = true;
+    });
+    this.textarea.addEventListener('compositionend', () => {
+      this.compositionEndTimer = window.setTimeout(() => {
+        this.composing = false;
+        this.finishComposition();
+        if (this.pendingBlur) this.exitEdit(true);
+      }, 0);
     });
     this.textarea.addEventListener('keydown', (event) => this.handleKeyDown(event));
     this.textarea.addEventListener('blur', (event) => {
@@ -378,6 +376,17 @@ export class MermaidBlockNodeView {
     return true;
   }
 
+  private commitContent(): void {
+    const pos = this.getPos();
+    const node = typeof pos === 'number' ? this.view.state.doc.nodeAt(pos) : null;
+    if (!this.textarea || !this.view.editable || node?.type !== this.node.type) return;
+    const code = this.textarea.value;
+    this.originalCode = code;
+    if (code !== node.attrs.code) {
+      this.view.dispatch(this.view.state.tr.setNodeAttribute(pos, 'code', code));
+    }
+  }
+
   private exitEdit(save: boolean, selection: 'before' | 'after' | 'preserve' = 'preserve'): void {
     if (!this.editing) return;
     if (this.destroyed || this.view.isDestroyed) {
@@ -389,6 +398,10 @@ export class MermaidBlockNodeView {
       selection = 'preserve';
     }
 
+    if (this.composing && save) {
+      this.pendingBlur = true;
+      return;
+    }
     const newCode = save && this.textarea ? this.textarea.value : this.originalCode;
     const oldCode = this.node.attrs.code as string;
     const pos = this.getPos();
@@ -420,10 +433,11 @@ export class MermaidBlockNodeView {
     unregisterActiveEdit(this.view, this.activeEditExitFn);
     this.disposeViewport();
     this.editing = false;
-    this.clearPreviewDebounce();
-    this.previewRenderId += 1;
+    window.clearTimeout(this.compositionEndTimer);
+    this.composing = false;
+    this.pendingBlur = false;
+    this.finishComposition();
     this.clearPendingRender();
-    this.renderedCode = null;
     this.dom.classList.remove('is-editing');
     this.editSurfaceEl?.remove();
     this.textarea = null;
@@ -470,6 +484,8 @@ export class MermaidBlockNodeView {
       this.exitEdit(false);
       return;
     }
+
+    if (this.composing || event.isComposing || event.keyCode === 229) return;
 
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && event.shiftKey) {
       event.preventDefault();
@@ -523,90 +539,6 @@ export class MermaidBlockNodeView {
   private autoResizeTextarea(): void {
     if (!this.textarea) return;
     this.textarea.rows = Math.max(4, this.textarea.value.split('\n').length);
-  }
-
-  private updatePreview(): Promise<void> {
-    if (
-      this.destroyed || this.view.isDestroyed || !this.editing || !this.previewEl || !this.textarea
-    ) return Promise.resolve();
-    this.clearPendingRender();
-    const id = ++this.previewRenderId;
-    const code = this.textarea.value;
-    const renderer = getDiagramRenderer();
-    if (!code.trim()) {
-      this.setPreviewContent('', { error: false, renderId: id });
-      return Promise.resolve();
-    }
-    if (!renderer) {
-      this.setPreviewContent('(diagram renderer unavailable)', { error: true, renderId: id });
-      return Promise.resolve();
-    }
-
-    const controller = new AbortController();
-    this.renderAbort = controller;
-    return this.trackPendingRender((async () => {
-      try {
-        const result = await renderer.renderMermaid(code, { theme: this.getTheme(), signal: controller.signal });
-        if (
-          this.destroyed || this.view.isDestroyed || !this.editing ||
-          !this.previewEl || id !== this.previewRenderId || controller.signal.aborted
-        ) return;
-        if (result.error) {
-          this.setPreviewContent(result.error, { error: true, renderId: id });
-        } else {
-          this.setPreviewContent(normalizeMermaidSvgSize(result.svg), {
-            error: false,
-            html: true,
-            renderId: id,
-          });
-        }
-      } catch (error) {
-        if (
-          this.destroyed || this.view.isDestroyed || !this.editing ||
-          !this.previewEl || id !== this.previewRenderId
-        ) return;
-        this.setPreviewContent(error instanceof Error ? error.message : t.mermaidRenderFailed(), {
-          error: true,
-          renderId: id,
-        });
-      }
-    })());
-  }
-
-  private schedulePreviewUpdate(): void {
-    this.clearPreviewDebounce();
-    this.previewRenderId += 1;
-    this.previewDebounceTimer = setTimeout(() => {
-      this.previewDebounceTimer = null;
-      void this.updatePreview();
-    }, MermaidBlockNodeView.PREVIEW_DEBOUNCE_MS);
-  }
-
-  private clearPreviewDebounce(): void {
-    if (this.previewDebounceTimer !== null) {
-      clearTimeout(this.previewDebounceTimer);
-      this.previewDebounceTimer = null;
-    }
-  }
-
-  private setPreviewContent(
-    content: string,
-    options: { error: boolean; html?: boolean; renderId: number },
-  ): void {
-    if (this.destroyed || !this.editing || !this.previewEl || options.renderId !== this.previewRenderId) return;
-
-    this.disposeViewport();
-    this.previewEl.classList.toggle('is-error', options.error);
-    const renderedEl = document.createElement('div');
-    renderedEl.className = 'mermaid-block-preview-render';
-    if (options.html) renderedEl.innerHTML = content;
-    else renderedEl.textContent = content;
-    this.previewEl.replaceChildren(renderedEl);
-    this.previewSnapshotEl = null;
-    if (options.html && renderedEl.querySelector('svg')) {
-      normalizeRenderedMermaidViewport(renderedEl);
-      this.bindPreviewViewport();
-    }
   }
 
   private viewLabels() {

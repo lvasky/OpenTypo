@@ -214,7 +214,8 @@ const tableMarkdownSerializer = new MarkdownSerializer(
     },
     footnote_def(state, node) {
       state.ensureNewLine();
-      state.write(`[^${node.attrs.id}]: `);
+      const separator = node.childCount && !/^[ \t]/.test(node.firstChild?.text ?? '') ? ' ' : '';
+      state.write(`[^${node.attrs.id}]:${separator}`);
       state.renderInline(node);
       state.closeBlock(node);
     },

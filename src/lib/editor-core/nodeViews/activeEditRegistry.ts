@@ -9,15 +9,16 @@ import type { EditorView } from 'prosemirror-view';
 
 type ExitEditFn = () => void;
 
-interface ActiveEditComposition {
+interface ActiveEditOptions {
   isComposing?: () => boolean;
   waitForCompositionEnd?: () => Promise<void>;
+  exitOnManualSave?: boolean;
 }
 
 interface ActiveEdit {
   exit: ExitEditFn;
   commit?: () => void;
-  composition?: ActiveEditComposition;
+  options?: ActiveEditOptions;
 }
 
 const activeEdits = new WeakMap<EditorView, ActiveEdit[]>();
@@ -27,15 +28,15 @@ export function registerActiveEdit(
   view: EditorView,
   exitFn: ExitEditFn,
   commitFn?: () => void,
-  composition?: ActiveEditComposition,
+  options?: ActiveEditOptions,
 ): void {
   const previous = activeEdits.get(view)?.at(-1);
   if (previous && previous.exit !== exitFn) {
     previous.exit();
-    if (!previous.composition?.isComposing?.()) unregisterActiveEdit(view, previous.exit);
+    if (!previous.options?.isComposing?.()) unregisterActiveEdit(view, previous.exit);
   }
   const remaining = (activeEdits.get(view) ?? []).filter((edit) => edit.exit !== exitFn);
-  activeEdits.set(view, [...remaining, { exit: exitFn, commit: commitFn, composition }]);
+  activeEdits.set(view, [...remaining, { exit: exitFn, commit: commitFn, options }]);
 }
 
 /** 注销一个编辑对象；不会影响正在组字或新进入的其它节点。 */
@@ -46,10 +47,10 @@ export function unregisterActiveEdit(view: EditorView, exitFn: ExitEditFn): void
 }
 
 /** 保存或快照只提交临时输入；切换模式时可明确要求结束编辑态。 */
-export function commitActiveEdit(view: EditorView, exitEditing = false): void {
+export function commitActiveEdit(view: EditorView, exitEditing = false, manualSave = false): void {
   for (const active of [...(activeEdits.get(view) ?? [])]) {
-    if (active.composition?.isComposing?.()) continue;
-    if (!exitEditing && active.commit) {
+    if (active.options?.isComposing?.()) continue;
+    if (!exitEditing && !(manualSave && active.options?.exitOnManualSave) && active.commit) {
       active.commit();
     } else {
       unregisterActiveEdit(view, active.exit);
@@ -62,15 +63,15 @@ export function commitActiveEdit(view: EditorView, exitEditing = false): void {
 export async function awaitActiveEditCompositionEnd(view: EditorView): Promise<void> {
   while (true) {
     const composing = (activeEdits.get(view) ?? []).filter(
-      (edit) => edit.composition?.isComposing?.() && edit.composition.waitForCompositionEnd,
+      (edit) => edit.options?.isComposing?.() && edit.options.waitForCompositionEnd,
     );
     if (composing.length === 0) return;
-    await Promise.all(composing.map((edit) => edit.composition!.waitForCompositionEnd!()));
+    await Promise.all(composing.map((edit) => edit.options!.waitForCompositionEnd!()));
   }
 }
 
 export function isActiveEditComposing(view: EditorView): boolean {
-  return (activeEdits.get(view) ?? []).some((edit) => edit.composition?.isComposing?.());
+  return (activeEdits.get(view) ?? []).some((edit) => edit.options?.isComposing?.());
 }
 
 /** 已切换为只读时退出所有旧输入；节点按 view.editable 丢弃临时内容。 */

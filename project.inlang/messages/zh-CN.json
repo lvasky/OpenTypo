@@ -139,7 +139,7 @@
   "readonlyCannotDeleteMetadata": "当前文档只读，无法删除元数据",
   "featureComingSoon": "{featureName}功能开发中",
   "zoomStatus": "缩放 {percent}%",
-  "deleteImageAndLocalFile": "删除图片及本地文件",
+  "deleteImageAndLocalFile": "删除本地图片",
   "imageCleanupRemovedFailed": "已删除 {removed} 个图片文件，{failed} 个删除失败",
   "imageCleanupRemoved": "已删除 {removed} 个图片文件",
   "imageCleanupFailed": "{failed} 个图片文件删除失败",

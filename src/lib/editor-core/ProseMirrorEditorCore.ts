@@ -80,6 +80,7 @@ import { codeBlockNavigationPlugin } from './plugins/codeBlockNavigation';
 import { displayMathInputPlugin } from './plugins/displayMathInput';
 import { mathInlineInputPlugin } from './plugins/mathInlineInput';
 import { mathInlineDraftPlugin, mathInlineDraftKey, canInsertMathInline, cancelMathInlineDraft } from './plugins/mathInlineDraft';
+import { markdownSourceEditorPlugin } from './plugins/markdownSourceEditor';
 import { linkInteractionPlugin } from './plugins/linkInteraction';
 import {
   inlineSourceEditingPlugin,
@@ -368,10 +369,10 @@ export class ProseMirrorEditorCore implements EditorCore {
     return selection instanceof NodeSelection && selection.from === getPos();
   }
 
-  commitPendingEdits(): void {
+  commitPendingEdits(manualSave = false): void {
     this.assertActive();
     if (this.view && !isActiveEditComposing(this.view)) {
-      commitActiveEdit(this.view);
+      commitActiveEdit(this.view, false, manualSave);
       if (this.isEditable()) clearEmptyInlineTemplates(this.view);
     }
     this.flushPendingMarkdownSync();
@@ -1699,6 +1700,7 @@ export class ProseMirrorEditorCore implements EditorCore {
         mathInlineInputPlugin(() => this.view),
         mathInlineDraftPlugin(),
         inlineSourceEditingPlugin({ readonly: () => !this.isEditable() }),
+        markdownSourceEditorPlugin(),
         linkInteractionPlugin({ openLink: this.options.onOpenLink }),
         codeHighlightPlugin(),
         codeHighlightDecorationPlugin({ enabled: false }),
@@ -2000,7 +2002,7 @@ export class ProseMirrorEditorCore implements EditorCore {
       this.pendingMarkdownDoc = nextState.doc;
       this.dirty = !nextState.doc.eq(this.originalDoc);
       this.scheduleMarkdownSync();
-      this.notifyDeletedImages(previousDoc, nextState.doc, transaction.getMeta(IMAGE_FILE_DELETE_META) === true);
+      this.notifyDeletedImages(previousDoc, nextState.doc, transaction.getMeta(IMAGE_FILE_DELETE_META));
     }
 
     // 每次事务都递增版本并通知（pending mark 状态切换、选区变化等需要及时反映到 UI）
@@ -2189,9 +2191,9 @@ export class ProseMirrorEditorCore implements EditorCore {
   private notifyDeletedImages(
     previousDoc: ProseMirrorNode,
     nextDoc: ProseMirrorNode,
-    deleteFile: boolean,
+    deleteFile: boolean | undefined,
   ): void {
-    if (!this.options.onImagesDeleted) {
+    if (deleteFile === false || !this.options.onImagesDeleted) {
       return;
     }
 

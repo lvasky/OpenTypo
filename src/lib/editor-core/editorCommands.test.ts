@@ -8,6 +8,7 @@ import { parseMarkdown, serializeMarkdown } from './markdown';
 import { CodeBlockNodeView } from './nodeViews/CodeBlockNodeView';
 import { FootnoteDefNodeView } from './nodeViews/FootnoteDefNodeView';
 import { FootnoteRefNodeView } from './nodeViews/FootnoteRefNodeView';
+import { commitActiveEdit } from './nodeViews/activeEditRegistry';
 import { MathBlockNodeView } from './nodeViews/MathBlockNodeView';
 import { trailingParagraphPlugin } from './plugins/trailingParagraph';
 import { setCodeBlockMathRenderer } from './renderers';
@@ -296,8 +297,10 @@ describe('editorCommands', () => {
   });
 
   it('公式异步渲染返回后不覆盖已进入编辑态的 textarea', async () => {
+    const renderCalls: string[] = [];
     setCodeBlockMathRenderer({
       async render(tex) {
+        renderCalls.push(tex);
         await new Promise((resolve) => setTimeout(resolve, 20));
         return { html: `<span>${tex}</span>` };
       },
@@ -328,6 +331,17 @@ describe('editorCommands', () => {
     expect(mathBlock?.classList.contains('is-editing')).toBe(true);
     expect(textarea).not.toBeNull();
     expect(textarea!.value).toBe('E = mc^2');
+
+    textarea!.value = 'x^2';
+    textarea!.dispatchEvent(new Event('input', { bubbles: true }));
+    commitActiveEdit(view);
+    expect(renderCalls).toEqual(['E = mc^2']);
+    expect(target.querySelector('.math-block-textarea')).toBe(textarea);
+    expect(view.state.doc.firstChild?.attrs.tex).toBe('x^2');
+
+    commitActiveEdit(view, false, true);
+    expect(target.querySelector('.math-block-textarea')).toBeNull();
+    expect(renderCalls).toEqual(['E = mc^2', 'x^2']);
 
     view.destroy();
     target.remove();
