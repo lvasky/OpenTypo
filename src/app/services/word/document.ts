@@ -1,7 +1,7 @@
 import {
   AlignmentType, Bookmark, BorderStyle, Document, ExternalHyperlink, FootnoteReferenceRun,
   HeadingLevel, ImageRun, InternalHyperlink, LevelFormat, Packer, Paragraph, ShadingType,
-  Table, TableCell, TableLayoutType, TableRow, TextRun, UnderlineType, VerticalAlign, WidthType,
+  Table, TableCell, TableLayoutType, TableOfContents, TableRow, TextRun, UnderlineType, VerticalAlign, WidthType,
   type IParagraphOptions, type IRunOptions, type INumberingOptions, type ParagraphChild,
 } from 'docx';
 import { normalizeLinkHref } from '../../../lib/editor-core/link';
@@ -216,7 +216,15 @@ export async function buildWordDocument(input: WordDocument): Promise<ArrayBuffe
     });
   }
 
-  const body = blocks(input.nodes);
+  const firstBlock = input.nodes[0];
+  const hasLeadingToc = firstBlock?.type === 'toc_block' &&
+    str(firstBlock, 'sourceMarker').trim() === '[TOC]';
+  const body = hasLeadingToc
+    ? [
+        new TableOfContents(undefined, { headingStyleRange: '1-6', hyperlink: true }),
+        ...blocks(input.nodes.slice(1)),
+      ]
+    : blocks(input.nodes);
   const footnotes: Record<string, { children: Paragraph[] }> = {};
   for (const [id, node] of footnoteNodes) {
     if (!footnoteReferences.has(id)) continue;
@@ -225,6 +233,7 @@ export async function buildWordDocument(input: WordDocument): Promise<ArrayBuffe
     footnotes[String(footnoteIds.get(id)!)] = { children: content.flatMap((block) => block instanceof Paragraph ? [block] : [new Paragraph(plain(node))]) };
   }
   const doc = new Document({ title: input.title, creator: 'Nomo',
+    ...(hasLeadingToc ? { features: { updateFields: true } } : {}),
     styles: { default: { document: { run: { font: FONT, size: 22, color: '202124' }, paragraph: { spacing: { after: 120, line: 360 } } } },
       paragraphStyles: [20, 16, 14, 12, 11, 11].map((size, index) => ({ id: `Heading${index + 1}`, name: `Heading ${index + 1}`,
         basedOn: 'Normal', next: 'Normal', quickFormat: true, run: { font: FONT, size: size * 2, bold: true, color: '202124' },
