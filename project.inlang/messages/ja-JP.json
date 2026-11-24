@@ -140,6 +140,7 @@
   "readonlyCannotDeleteMetadata": "現在の文書は読み取り専用のため、メタデータを削除できません",
   "featureComingSoon": "{featureName} は今後対応予定です",
   "zoomStatus": "ズーム {percent}%",
+  "deleteImageAndLocalFile": "画像とローカルファイルを削除",
   "imageCleanupRemovedFailed": "{removed} 個の画像ファイルを削除しました。{failed} 個は削除に失敗しました",
   "imageCleanupRemoved": "{removed} 個の画像ファイルを削除しました",
   "imageCleanupFailed": "{failed} 個の画像ファイルの削除に失敗しました",

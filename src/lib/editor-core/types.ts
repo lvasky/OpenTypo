@@ -108,6 +108,7 @@ export interface EditorChangeEvent {
 
 export interface EditorImageDeletionEvent {
   srcs: string[];
+  deleteFile?: boolean;
 }
 
 export interface EditorSelectionEvent {

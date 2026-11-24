@@ -278,6 +278,7 @@
     DEFAULT_IMAGE_HANDLING_SETTINGS,
     type ImageContext,
     type ImageHandlingSettings,
+    type ImageReference,
   } from '../lib/services/render';
   import { disableLogger, enableLogger, logError, logInfo } from '../lib/services/logger';
   import { createTauriSegmentedDocumentPort } from '../lib/text-editor/tauriPort';
@@ -7865,7 +7866,8 @@
     sourceCore: EditorCore,
   ) {
     const loader = getImageLoader();
-    if (!imageSettings.autoDeleteUnusedLocalImages || !loader?.remove || event.srcs.length === 0) {
+    if ((!event.deleteFile && !imageSettings.autoDeleteUnusedLocalImages) ||
+        !loader?.remove || event.srcs.length === 0) {
       return;
     }
 
@@ -7885,10 +7887,10 @@
     const parsed = imageSrcs === null ? null : tryParseMarkdown(latestMarkdown);
     // 解析失败或引用边界不确定时保留资源，不能把字面回退视为已无引用。
     if (imageSrcs === null || parsed === null) return;
-    const referencedSrcs = new Set([...imageSrcs].map(normalizeImageSrc));
     parsed.descendants((node) => {
-      if (node.type.name === 'image') referencedSrcs.add(normalizeImageSrc(node.attrs.src));
+      if (node.type.name === 'image') imageSrcs.add(String(node.attrs.src ?? ''));
     });
+    const referencedSrcs = new Set([...imageSrcs].map(normalizeImageSrc));
     const deletedSrcs = [...new Set(event.srcs)].filter((src) => {
       const normalized = normalizeImageSrc(src);
       return normalized && !referencedSrcs.has(normalized);
@@ -7896,7 +7898,25 @@
     if (deletedSrcs.length === 0) return;
 
     const context = getImageContext(sourceTabId);
-    Promise.allSettled(deletedSrcs.map((src) => loader.remove!(src, context))).then((results) => {
+    const references: ImageReference[] = [];
+    if (event.deleteFile) {
+      for (const src of imageSrcs) references.push({ src, documentPath: context.documentPath });
+      for (const other of tabs) {
+        if (!isMarkdownTab(other) || other.id === sourceTabId) continue;
+        const otherRuntime = documentRuntimes.get(other.id);
+        const markdown = otherRuntime && !otherRuntime.disposed
+          ? otherRuntime.editor.getMarkdown()
+          : other.markdown;
+        // A saved document may still reference the file even after an unsaved edit removed it.
+        for (const text of new Set([markdown, other.savedMarkdown ?? markdown])) {
+          const images = collectMarkdownImageSrcs(text);
+          if (images === null) return;
+          for (const src of images) references.push({ src, documentPath: other.nativePath ?? undefined });
+        }
+      }
+    }
+    const deletion = event.deleteFile ? { references } : undefined;
+    Promise.allSettled(deletedSrcs.map((src) => loader.remove!(src, context, deletion))).then((results) => {
       const removed = results.filter(
         (result) => result.status === 'fulfilled' && result.value.removed,
       ).length;
@@ -7906,6 +7926,11 @@
           (result.status === 'fulfilled' && Boolean(result.value.error)),
       ).length;
 
+      if (removed > 0 && currentFolderPath) {
+        void refreshExplorerFolders().catch((error) =>
+          logError('ImageDeletion', '刷新文件树失败', { error: String(error) }),
+        );
+      }
       if (removed > 0 && failed > 0) {
         statusMessage = t.imageCleanupRemovedFailed({ removed, failed });
       } else if (removed > 0) {

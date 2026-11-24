@@ -139,6 +139,7 @@
   "readonlyCannotDeleteMetadata": "The current document is read-only, so metadata cannot be deleted",
   "featureComingSoon": "{featureName} is coming soon",
   "zoomStatus": "Zoom {percent}%",
+  "deleteImageAndLocalFile": "Delete Image and Local File",
   "imageCleanupRemovedFailed": "Deleted {removed} image files; {failed} failed",
   "imageCleanupRemoved": "Deleted {removed} image files",
   "imageCleanupFailed": "{failed} image files failed to delete",

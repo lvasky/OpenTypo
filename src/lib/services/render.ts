@@ -37,10 +37,20 @@ export interface ImageRemoveResult {
   error?: string;
 }
 
+export interface ImageReference {
+  src: string;
+  documentPath?: string;
+}
+
+/** Extra context for an explicit image-file deletion from the editor menu. */
+export interface ImageFileDeletionOptions {
+  references: ImageReference[];
+}
+
 export interface ImageLoader {
   resolve(src: string, context: ImageContext): Promise<ImageResolveResult>;
   import(input: ImageImportInput, context: ImageContext): Promise<ImageImportResult>;
-  remove?(src: string, context: ImageContext): Promise<ImageRemoveResult>;
+  remove?(src: string, context: ImageContext, deletion?: ImageFileDeletionOptions): Promise<ImageRemoveResult>;
 }
 
 export type ImageInsertStrategy =

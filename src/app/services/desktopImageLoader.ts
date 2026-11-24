@@ -101,7 +101,7 @@ export function createDesktopImageLoader(): ImageLoader {
       };
     },
 
-    async remove(src: string, context: ImageContext) {
+    async remove(src, context, deletion) {
       if (isRemoteImageSrc(src) || !isTauriRuntime()) {
         return {
           src,
@@ -115,6 +115,11 @@ export function createDesktopImageLoader(): ImageLoader {
         input: {
           document_path: context.documentPath ?? null,
           src,
+          explicit: deletion !== undefined,
+          referenced_images: deletion?.references.map(({ src, documentPath }) => ({
+            src,
+            document_path: documentPath ?? null,
+          })) ?? [],
         },
       });
 

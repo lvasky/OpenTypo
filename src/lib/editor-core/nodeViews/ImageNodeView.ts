@@ -9,6 +9,8 @@ import {
   type ContextMenuItem,
 } from '../plugins/contextMenu';
 
+export const IMAGE_FILE_DELETE_META = 'image-file-delete';
+
 /**
  * Markdown 图片 NodeView。
  *
@@ -57,6 +59,7 @@ export class ImageNodeView {
   constructor(
     node: ProseMirrorNode,
     private readonly view: EditorView,
+    private readonly getPos: () => number | undefined,
     private readonly getImageContext: () => ImageContext,
     private readonly strictMarkdown: () => boolean = () => false,
   ) {
@@ -309,6 +312,9 @@ export class ImageNodeView {
     const absolutePath = () => this.currentResolved()?.absolutePath ?? String(this.node.attrs.src ?? '');
     const displaySrc = () => this.currentResolved()?.displaySrc ?? String(this.node.attrs.src ?? '');
     const disabled = !this.view.editable;
+    const canRequestLocalFileDeletion = () =>
+      Boolean(this.getImageContext().documentPath) &&
+      !/^(?:https?:|data:|blob:)/i.test(String(this.node.attrs.src ?? '').trim());
 
     const setNodeAttr = (name: string, value: unknown) => {
       if (!this.view.editable || this.view.isDestroyed || this.strictMarkdown()) return;
@@ -320,9 +326,11 @@ export class ImageNodeView {
 
     const removeNode = () => {
       if (!this.view.editable || this.view.isDestroyed) return;
-      const pos = this.findOwnPos();
-      if (pos < 0) return;
-      this.view.dispatch(this.view.state.tr.delete(pos, pos + this.node.nodeSize));
+      const pos = this.getPos();
+      if (pos === undefined || this.view.state.doc.nodeAt(pos) !== this.node) return;
+      const tr = this.view.state.tr.delete(pos, pos + this.node.nodeSize);
+      if (canRequestLocalFileDeletion()) tr.setMeta(IMAGE_FILE_DELETE_META, true);
+      this.view.dispatch(tr);
     };
 
     return [
@@ -388,7 +396,7 @@ export class ImageNodeView {
       // 危险操作
       { label: '', separator: true },
       {
-        label: t.deleteAction(),
+        label: canRequestLocalFileDeletion() ? t.deleteImageAndLocalFile() : t.deleteAction(),
         icon: 'delete',
         disabled,
         action: removeNode,

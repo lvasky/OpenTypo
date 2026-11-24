@@ -69,19 +69,7 @@ pub(crate) fn resolve_image_asset(input: ImageResolveInput) -> ImageResolvePaylo
         };
     }
 
-    let local_src = decode_percent_encoded_path(&src);
-    let absolute_path = if Path::new(&local_src).is_absolute() {
-        PathBuf::from(&local_src)
-    } else if let Some(document_path) = input.document_path {
-        let parent = Path::new(&document_path).parent().map(Path::to_path_buf);
-        if let Some(parent) = parent {
-            parent.join(local_src.replace('/', std::path::MAIN_SEPARATOR_STR))
-        } else {
-            PathBuf::from(&local_src)
-        }
-    } else {
-        PathBuf::from(&local_src)
-    };
+    let absolute_path = resolve_local_image_path(&src, input.document_path.as_deref());
 
     // File-system lookup accepts `..`, but Tauri's asset protocol deliberately
     // rejects ParentDir components. Resolve against the Markdown file first and
@@ -101,11 +89,27 @@ pub(crate) fn resolve_image_asset(input: ImageResolveInput) -> ImageResolvePaylo
     }
 }
 
+fn resolve_local_image_path(src: &str, document_path: Option<&str>) -> PathBuf {
+    let path = PathBuf::from(
+        decode_percent_encoded_path(src).replace('/', std::path::MAIN_SEPARATOR_STR),
+    );
+    if path.is_absolute() {
+        return path;
+    }
+    if let Some(parent) = document_path.and_then(|path| Path::new(path).parent()) {
+        return parent.join(path);
+    }
+    path
+}
+
 #[tauri::command]
 pub(crate) fn delete_image_asset(input: ImageDeleteInput) -> ImageDeletePayload {
     let src = input.src.trim().to_string();
     let local_src = decode_percent_encoded_path(&src);
-    if src.is_empty() || is_remote_image_src(&src) || Path::new(&local_src).is_absolute() {
+    if src.is_empty()
+        || is_remote_image_src(&src)
+        || (!input.explicit && Path::new(&local_src).is_absolute())
+    {
         return ImageDeletePayload {
             src,
             removed: false,
@@ -132,11 +136,7 @@ pub(crate) fn delete_image_asset(input: ImageDeleteInput) -> ImageDeletePayload 
         };
     };
 
-    let absolute_path = document_dir.join(
-        local_src
-            .trim_start_matches("./")
-            .replace('/', std::path::MAIN_SEPARATOR_STR),
-    );
+    let absolute_path = resolve_local_image_path(&src, Some(document_path));
 
     if !is_supported_image_file_path(&absolute_path) {
         return ImageDeletePayload {
@@ -156,12 +156,31 @@ pub(crate) fn delete_image_asset(input: ImageDeleteInput) -> ImageDeletePayload 
         };
     }
 
-    if let Err(error) = ensure_path_stays_in_document_dir(document_dir, &absolute_path) {
+    let canonical_image = match image_path_in_document_dir(document_dir, &absolute_path) {
+        Ok(path) => path,
+        Err(error) => {
+            return ImageDeletePayload {
+                src,
+                removed: false,
+                skipped: true,
+                error: Some(error),
+            };
+        }
+    };
+    if input.referenced_images.iter().any(|reference| {
+        let src = reference.src.trim();
+        if src.is_empty() || is_remote_image_src(src) {
+            return false;
+        }
+        let path = resolve_local_image_path(src, reference.document_path.as_deref());
+        (path.is_absolute() || reference.document_path.is_some())
+            && path.canonicalize().is_ok_and(|path| path == canonical_image)
+    }) {
         return ImageDeletePayload {
             src,
             removed: false,
             skipped: true,
-            error: Some(error),
+            error: None,
         };
     }
 
@@ -529,7 +548,7 @@ fn bytes_fingerprint(bytes: &[u8]) -> String {
         .collect::<String>()
 }
 
-fn ensure_path_stays_in_document_dir(document_dir: &Path, image_path: &Path) -> Result<(), String> {
+fn image_path_in_document_dir(document_dir: &Path, image_path: &Path) -> Result<PathBuf, String> {
     let document_dir = document_dir
         .canonicalize()
         .map_err(|error| format!("解析文档目录失败：{error}"))?;
@@ -538,7 +557,7 @@ fn ensure_path_stays_in_document_dir(document_dir: &Path, image_path: &Path) -> 
         .map_err(|error| format!("解析图片路径失败：{error}"))?;
 
     if image_path.starts_with(&document_dir) {
-        Ok(())
+        Ok(image_path)
     } else {
         Err("图片路径不在当前文档目录内，已跳过删除".to_string())
     }
@@ -811,10 +830,61 @@ mod tests {
         let result = delete_image_asset(ImageDeleteInput {
             document_path: Some(dir.join("doc.md").to_string_lossy().to_string()),
             src: "./assets/image.png".to_string(),
+            explicit: false,
+            referenced_images: Vec::new(),
         });
 
         assert!(result.removed);
         assert!(!image_path.exists());
+        cleanup_test_dir(&dir);
+    }
+
+    #[test]
+    fn explicit_delete_accepts_absolute_local_assets_and_respects_other_references() {
+        let dir = create_test_dir("explicit-image-delete");
+        let image_path = dir.join("image.png");
+        fs::write(&image_path, [1, 2, 3]).expect("image");
+        let document_path = Some(dir.join("doc.md").to_string_lossy().into_owned());
+        let src = image_path.to_string_lossy().into_owned();
+        let protected = delete_image_asset(ImageDeleteInput {
+            document_path: document_path.clone(),
+            src: src.clone(),
+            explicit: true,
+            referenced_images: vec![ImageResolveInput {
+                document_path: Some(dir.join("other.md").to_string_lossy().into_owned()),
+                src: "./%69mage.png".to_string(),
+            }],
+        });
+        assert!(protected.skipped);
+        assert!(image_path.is_file());
+
+        let deleted = delete_image_asset(ImageDeleteInput {
+            document_path,
+            src,
+            explicit: true,
+            referenced_images: Vec::new(),
+        });
+        assert!(deleted.removed, "{:?}", deleted.error);
+        assert!(!image_path.exists());
+        cleanup_test_dir(&dir);
+    }
+
+    #[test]
+    fn explicit_delete_keeps_images_outside_the_document_directory() {
+        let dir = create_test_dir("explicit-image-delete-outside");
+        let documents = dir.join("documents");
+        fs::create_dir_all(&documents).expect("documents");
+        let image_path = dir.join("image.png");
+        fs::write(&image_path, [1, 2, 3]).expect("image");
+
+        let result = delete_image_asset(ImageDeleteInput {
+            document_path: Some(documents.join("doc.md").to_string_lossy().into_owned()),
+            src: "../image.png".to_string(),
+            explicit: true,
+            referenced_images: Vec::new(),
+        });
+        assert!(result.skipped);
+        assert!(image_path.is_file());
         cleanup_test_dir(&dir);
     }
 

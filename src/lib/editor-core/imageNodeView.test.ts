@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createEditorCore, setImageLoader } from './createEditorCore';
+import type { ContextMenuItem } from './plugins/contextMenu';
+import type { EditorImageDeletionEvent } from './types';
 
 describe('ImageNodeView', () => {
   it('renders resolved images with a fullscreen button', async () => {
@@ -66,6 +68,44 @@ describe('ImageNodeView', () => {
 
     editor.destroy();
     target.remove();
+  });
+
+  it('requests file deletion only on the final reference removed through the image menu', async () => {
+    const target = document.body.appendChild(document.createElement('div'));
+    const deleted: EditorImageDeletionEvent[] = [];
+    const editor = createEditorCore({
+      markdown: '![first](./assets/a.png)\n\n![second](assets/a.png)',
+      target,
+      getImageContext: () => ({ documentPath: 'C:/docs/note.md' }),
+      onImagesDeleted: (event) => deleted.push(event),
+    });
+    let action: ContextMenuItem['action'];
+    target.addEventListener('image-context-menu', (event) => {
+      const { items } = (event as CustomEvent<{ items: ContextMenuItem[] }>).detail;
+      action = items.find((item) => item.icon === 'delete')?.action;
+    });
+    const deleteImage = (index: number) => {
+      target.querySelectorAll('.image-node')[index].dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true }),
+      );
+      expect(action).toBeTypeOf('function');
+      action?.();
+    };
+
+    try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      deleteImage(1);
+      expect(editor.getMarkdown()).toContain('![first](./assets/a.png)');
+      expect(editor.getMarkdown()).not.toContain('second');
+      expect(deleted).toEqual([]);
+
+      deleteImage(0);
+      expect(editor.getMarkdown()).not.toContain('assets/a.png');
+      expect(deleted).toEqual([{ srcs: ['./assets/a.png'], deleteFile: true }]);
+    } finally {
+      editor.destroy();
+      target.remove();
+    }
   });
 
   it('reports an image deletion only after the final reference is removed', () => {

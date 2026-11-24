@@ -51,7 +51,7 @@ import { CommentInlineNodeView } from './nodeViews/CommentInlineNodeView';
 import { FootnoteDefNodeView } from './nodeViews/FootnoteDefNodeView';
 import { FootnoteRefNodeView } from './nodeViews/FootnoteRefNodeView';
 import { HtmlBlockNodeView } from './nodeViews/HtmlBlockNodeView';
-import { ImageNodeView } from './nodeViews/ImageNodeView';
+import { IMAGE_FILE_DELETE_META, ImageNodeView } from './nodeViews/ImageNodeView';
 import { MathBlockNodeView } from './nodeViews/MathBlockNodeView';
 import { MathInlineNodeView } from './nodeViews/MathInlineNodeView';
 import { MermaidBlockNodeView } from './nodeViews/MermaidBlockNodeView';
@@ -331,8 +331,8 @@ export class ProseMirrorEditorCore implements EditorCore {
       nodeViews: {
         code_block: (node, view, getPos) =>
           new CodeBlockNodeView(node, view, getPos as () => number, this.isRestoringNodeSelection(getPos)),
-        image: (node, view) =>
-          new ImageNodeView(node, view, () => this.options.getImageContext?.() ?? {}, () => this.runtime.strictMarkdown ?? true),
+        image: (node, view, getPos) =>
+          new ImageNodeView(node, view, getPos, () => this.options.getImageContext?.() ?? {}, () => this.runtime.strictMarkdown ?? true),
         html_block: (node, view, getPos) =>
           new HtmlBlockNodeView(node, view, getPos as () => number),
         comment_block: (node, view, getPos) =>
@@ -2000,7 +2000,7 @@ export class ProseMirrorEditorCore implements EditorCore {
       this.pendingMarkdownDoc = nextState.doc;
       this.dirty = !nextState.doc.eq(this.originalDoc);
       this.scheduleMarkdownSync();
-      this.notifyDeletedImages(previousDoc, nextState.doc);
+      this.notifyDeletedImages(previousDoc, nextState.doc, transaction.getMeta(IMAGE_FILE_DELETE_META) === true);
     }
 
     // 每次事务都递增版本并通知（pending mark 状态切换、选区变化等需要及时反映到 UI）
@@ -2186,7 +2186,11 @@ export class ProseMirrorEditorCore implements EditorCore {
     }
   }
 
-  private notifyDeletedImages(previousDoc: ProseMirrorNode, nextDoc: ProseMirrorNode): void {
+  private notifyDeletedImages(
+    previousDoc: ProseMirrorNode,
+    nextDoc: ProseMirrorNode,
+    deleteFile: boolean,
+  ): void {
     if (!this.options.onImagesDeleted) {
       return;
     }
@@ -2195,10 +2199,10 @@ export class ProseMirrorEditorCore implements EditorCore {
     if (deletedSrcs.length === 0) return;
     // 当前语义事务尚未同步 this.markdown；用 nextDoc 校验真实删除候选。
     const nextMarkdown = serializeMarkdown(removeEmptyTrailingParagraph(nextDoc), { strictMarkdown: this.runtime.strictMarkdown });
-    this.notifyDeletedImageSrcs(filterFullyRemovedImageSrcs(deletedSrcs, nextMarkdown));
+    this.notifyDeletedImageSrcs(filterFullyRemovedImageSrcs(deletedSrcs, nextMarkdown), deleteFile);
   }
 
-  private notifyDeletedImageSrcs(deletedSrcs: string[]): void {
+  private notifyDeletedImageSrcs(deletedSrcs: string[], deleteFile = false): void {
     if (!this.options.onImagesDeleted) {
       return;
     }
@@ -2207,7 +2211,9 @@ export class ProseMirrorEditorCore implements EditorCore {
       return;
     }
 
-    const event: EditorImageDeletionEvent = { srcs: deletedSrcs };
+    const event: EditorImageDeletionEvent = deleteFile
+      ? { srcs: deletedSrcs, deleteFile: true }
+      : { srcs: deletedSrcs };
     this.options.onImagesDeleted(event);
   }
 }

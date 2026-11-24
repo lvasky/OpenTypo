@@ -245,6 +245,10 @@ pub(crate) struct ImageResolvePayload {
 pub(crate) struct ImageDeleteInput {
     pub(crate) document_path: Option<String>,
     pub(crate) src: String,
+    #[serde(default)]
+    pub(crate) explicit: bool,
+    #[serde(default)]
+    pub(crate) referenced_images: Vec<ImageResolveInput>,
 }
 
 #[derive(Debug, Serialize)]

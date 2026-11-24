@@ -139,6 +139,7 @@
   "readonlyCannotDeleteMetadata": "目前文件唯讀，無法刪除中繼資料",
   "featureComingSoon": "{featureName}功能開發中",
   "zoomStatus": "縮放 {percent}%",
+  "deleteImageAndLocalFile": "刪除圖片及本機檔案",
   "imageCleanupRemovedFailed": "已刪除 {removed} 個圖片檔案，{failed} 個刪除失敗",
   "imageCleanupRemoved": "已刪除 {removed} 個圖片檔案",
   "imageCleanupFailed": "{failed} 個圖片檔案刪除失敗",
