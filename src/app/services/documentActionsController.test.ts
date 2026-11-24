@@ -1,10 +1,11 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import type { NativeDocument } from '../../lib/desktop/tauriStorage';
+import * as outlineService from '../../lib/outline/outlineService';
 import type { MarkdownTabState, Tab } from '../types';
 import { createEmptyExternalFileChange } from '../types';
 import { createDocumentActionsController } from './documentActionsController';
 import { confirmAction } from './confirmAction';
-import { saveNativeMarkdownFile, getExternalFileChange } from './documentFiles';
+import { saveNativeMarkdownFile, getExternalFileChange, rememberNativeDocument } from './documentFiles';
 import { createMarkdownTab, createSegmentedTextTab, isMarkdownTab } from './tabs';
 
 vi.mock('./confirmAction', () => ({
@@ -231,6 +232,29 @@ describe('documentActionsController', () => {
     await controller.applyNativeDocument(document, 'opened again');
     expect(getState().tabs).toHaveLength(2);
     expect(getState().tabs[0]).toEqual(before);
+  });
+
+  it('opens the document and remembers it even when word counting fails', async () => {
+    const { options, getState } = createOptions([createTab()]);
+    const controller = createDocumentActionsController(options as any);
+    const document: NativeDocument = {
+      path: 'C:/docs/stats-error.md',
+      fileName: 'stats-error.md',
+      markdown: '# Open anyway',
+      modifiedAt: 1,
+      sizeBytes: 13,
+      readonly: false,
+    };
+    const calculateStats = vi.spyOn(outlineService, 'calculateDocumentStats').mockImplementationOnce(() => {
+      throw new Error('Statistics unavailable');
+    });
+    try {
+      await expect(controller.applyNativeDocument(document, 'opened')).resolves.toBeUndefined();
+      expect(rememberNativeDocument).toHaveBeenCalledWith(document, 0);
+      expect(getState().tabs[1]).toMatchObject({ nativePath: document.path, markdown: document.markdown });
+    } finally {
+      calculateStats.mockRestore();
+    }
   });
 
   it('关闭脏标签时，如果保存失败则保留标签页', async () => {

@@ -75,6 +75,37 @@ export function recordInlinePositions(markdown: MarkdownIt): void {
   };
 }
 
+/** Map a GFM row after markdown-it removes one backslash before an escaped pipe. */
+export function locateTableCells(row: string, start: number) {
+  const leading = row.length - row.trimStart().length;
+  const end = row.trimEnd().length;
+  const cells: Array<{ text: string; positions: number[] }> = [];
+  let text = '';
+  let positions: number[] = [];
+  const finishCell = () => {
+    const trimStart = text.length - text.trimStart().length;
+    cells.push({ text: text.trim(), positions: positions.slice(trimStart, text.trimEnd().length) });
+    text = '';
+    positions = [];
+  };
+  for (let i = leading; i < end; i++) {
+    if (row[i] === '|') {
+      if (row[i - 1] !== '\\') {
+        finishCell();
+        continue;
+      }
+      text = text.slice(0, -1);
+      positions.pop();
+    }
+    text += row[i] === '\0' ? '\uFFFD' : row[i];
+    positions.push(start + i);
+  }
+  finishCell();
+  if (row[leading] === '|') cells.shift();
+  if (row[end - 1] === '|' && row[end - 2] !== '\\') cells.pop();
+  return cells;
+}
+
 export function tokenSpans(token: Token): TextSourceSpan[] {
   const spans: TextSourceSpan[] = token.meta?.statsSpans ?? [];
   const original = spans.map((span) => span.text).join('');

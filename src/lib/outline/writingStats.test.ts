@@ -88,6 +88,18 @@ describe('writing statistics', () => {
     expect(queryWritingStats(index)).toMatchObject({ words: 8, visibleChars: 8, lines: 3 });
     expect(queryWritingStats(index, source.lastIndexOf('中文'), source.length).words).toBe(2);
   });
+  it('maps escaped table pipes to their own cells, even when the same text appears later', () => {
+    const source = '> | Left | Right |\r\n> | --- | --- |\r\n> | \\| | A \\| B |\r\n\r\nTail';
+    const index = buildSourceWritingStats(source);
+    const firstPipe = source.indexOf('\\|') + 1;
+    const secondPipe = source.lastIndexOf('\\|') + 1;
+    expect(queryWritingStats(index)).toMatchObject({ words: 5, visibleChars: 17 });
+    for (const pipe of [firstPipe, secondPipe]) {
+      expect(queryWritingStats(index, pipe - 1, pipe).visibleChars).toBe(0);
+      expect(queryWritingStats(index, pipe, pipe + 1).visibleChars).toBe(1);
+    }
+    expect(queryWritingStats(index, source.lastIndexOf('Tail'))).toMatchObject({ words: 1 });
+  });
   it.each([
     '<div>\r\n<strong>中文</strong> hello &amp;\r\n</div>',
     '<p>\r\n<a href="https://example.com"><img src="badge.png" /></a>\r\n</p>',

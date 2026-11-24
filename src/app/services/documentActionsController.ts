@@ -18,7 +18,7 @@ import {
   rememberNativeDocument,
   saveNativeMarkdownFile,
 } from './documentFiles';
-import { logInfo } from '../../lib/services/logger';
+import { logInfo, logWarn } from '../../lib/services/logger';
 import {
   DEFAULT_MARKDOWN_ENCODING,
   normalizeMarkdownEncoding,
@@ -413,8 +413,7 @@ export function createDocumentActionsController(options: DocumentActionsOptions)
     options.loadTabState(targetTab);
 
     options.setStatusMessage(message);
-    await rememberNativeDocument(document, calculateDocumentStats(document.markdown).words);
-    await refreshRecentFiles();
+    await rememberRecentMarkdown(document, document.markdown);
     if (isLargeDocument) {
       options.setStatusMessage(t.largeDocumentReadonlyOpened());
     }
@@ -455,8 +454,7 @@ export function createDocumentActionsController(options: DocumentActionsOptions)
 
     options.setStatusMessage(message);
     if (isNewPath) {
-      await rememberNativeDocument(document, calculateDocumentStats(markdownToSave).words);
-      await refreshRecentFiles();
+      await rememberRecentMarkdown(document, markdownToSave);
     }
     if (isLargeDocument) {
       options.setStatusMessage(t.largeDocumentReadonlyOpened());
@@ -582,6 +580,17 @@ export function createDocumentActionsController(options: DocumentActionsOptions)
   }
 
   let recentRefreshGeneration = 0;
+  async function rememberRecentMarkdown(document: NativeDocument, markdown: string) {
+    let words = 0;
+    try {
+      words = calculateDocumentStats(markdown).words;
+    } catch (error) {
+      logWarn('WritingStats', '计算最近文件字数失败', { error });
+    }
+    await rememberNativeDocument(document, words);
+    await refreshRecentFiles();
+  }
+
   async function refreshRecentFiles() {
     const generation = ++recentRefreshGeneration;
     const entries = await loadRecentEntries(options.getDesktopEnabled());

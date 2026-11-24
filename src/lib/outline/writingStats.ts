@@ -5,7 +5,7 @@ import { classifyHtmlBlock } from '../editor-core/html/htmlClassifier';
 import { INLINE_TAG_TO_MARK } from '../editor-core/html/htmlPolicy';
 import { normalizeLinkHref } from '../editor-core/link';
 import { splitFrontMatterBlock } from '../markdown/frontMatter';
-import { recordInlinePositions, tokenSpans } from './sourceTokenPositions';
+import { locateTableCells, recordInlinePositions, tokenSpans } from './sourceTokenPositions';
 import type { DocumentStats } from './outlineService';
 
 interface BodyRun {
@@ -163,45 +163,59 @@ export function queryWritingStats(
   };
 }
 
-/** 原始源码与 tokenizer 内联内容的映射，保留列表／引用前缀和 CRLF 的偏移。 */
+function containerPrefixLength(line: string, lists: number, quotes: number): number {
+  let offset = 0;
+  while (lists || quotes) {
+    const remaining = line.slice(offset);
+    const quote = quotes ? /^[ \t]*>[ \t]?/.exec(remaining)?.[0] : undefined;
+    if (quote) {
+      offset += quote.length;
+      quotes--;
+      continue;
+    }
+    const list = lists ? /^[ \t]*(?:[-+*]|\d{1,9}[.)])[ \t]+/.exec(remaining)?.[0] : undefined;
+    if (!list) break;
+    offset += list.length;
+    lists--;
+  }
+  return offset;
+}
+
+/** Limit every lookup to the token's own source lines. */
 function locateInline(
   content: string,
   source: string,
-  start: number,
-  containers: { list: boolean; quote: boolean; heading: boolean },
-): number[] {
+  from: number,
+  to: number,
+  lists: number,
+  quotes: number,
+  heading: boolean,
+): number[] | null {
+  const rawLines = source.slice(from, to).split(/(\r\n?|\n)/);
+  const parts = content.split('\n');
   const result: number[] = [];
-  let cursor = start;
-  let first = true;
-  for (const part of content.split('\n')) {
-    if (!first) {
-      const newline = /\r\n|\r|\n/.exec(source.slice(cursor));
-      if (!newline) throw new Error('Cannot locate Markdown continuation');
-      cursor += newline.index + newline[0].length;
+  let lineStart = from;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    const raw = rawLines[i * 2];
+    if (raw === undefined) {
+      // HTML blocks can include a synthesized final LF at EOF.
+      if (i === parts.length - 1 && !part && lineStart === to) break;
+      return null;
     }
-    first = false;
-    let prefix = source.slice(
-      cursor,
-      source.indexOf('\n', cursor) < 0 ? source.length : source.indexOf('\n', cursor),
-    );
-    if (containers.quote) {
-      const quote = /^(?:[ \t]*>[ \t]?)+/.exec(prefix)?.[0].length ?? 0;
-      cursor += quote;
-      prefix = prefix.slice(quote);
-    }
-    if (containers.list) {
-      const marker = /^[ \t]*(?:[-+*]|\d+[.)])[ \t]+/.exec(prefix)?.[0].length ?? 0;
-      cursor += marker;
-      prefix = prefix.slice(marker);
-    }
-    if (containers.heading) cursor += /^[ \t]*#{1,6}[ \t]+/.exec(prefix)?.[0].length ?? 0;
-    const found = source.indexOf(part, cursor);
-    if (found < 0) throw new Error('Cannot locate Markdown inline content');
-    for (let i = 0; i < part.length; i++) result.push(found + i);
-    cursor = found + part.length;
-    result.push(cursor);
+    let offset = containerPrefixLength(raw, i === 0 ? lists : 0, quotes);
+    if (i === 0 && heading) offset += /^[ \t]*#{1,6}[ \t]+/.exec(raw.slice(offset))?.[0].length ?? 0;
+    const line = raw.replace(/\0/g, '\uFFFD');
+    // markdown-it can leave synthetic leading spaces when it partially expands an indenting tab.
+    const text = part.trimStart();
+    const found = line.indexOf(text, offset);
+    if (found < 0) return null;
+    const leading = part.length - text.length;
+    for (let j = 0; j < leading; j++) result.push(lineStart + Math.max(offset, found - leading + j));
+    for (let j = 0; j < text.length; j++) result.push(lineStart + found + j);
+    if (i < parts.length - 1) result.push(lineStart + raw.length);
+    lineStart += raw.length + (rawLines[i * 2 + 1]?.length ?? 0);
   }
-  result.pop();
   return result;
 }
 
@@ -211,8 +225,9 @@ function locateBlock(
   source: string,
   from: number,
   to: number,
-  containers: { list: boolean; quote: boolean; heading: boolean },
-): number[] {
+  lists: number,
+  quotes: number,
+): number[] | null {
   const positions: number[] = [];
   let normalized = '';
   for (let i = from; i < to; i++) {
@@ -220,10 +235,10 @@ function locateBlock(
     if (source[i] === '\r') {
       normalized += '\n';
       if (source[i + 1] === '\n') i++;
-    } else normalized += source[i];
+    } else normalized += source[i] === '\0' ? '\uFFFD' : source[i];
   }
   const offset = normalized.indexOf(content);
-  if (offset < 0) return locateInline(content, source, from, containers);
+  if (offset < 0) return locateInline(content, source, from, to, lists, quotes, false);
   return positions.slice(offset, offset + content.length);
 }
 
@@ -255,6 +270,8 @@ export function buildSourceWritingStats(markdown: string): WritingStatsIndex {
     quoteDepth = 0;
   let inHeading = false;
   const htmlMarks: string[] = [];
+  let tableCells: ReturnType<typeof locateTableCells> | null = null;
+  let tableColumn = 0;
   for (const token of tokenizer.parse(body, {})) {
     if (token.type === 'list_item_open') listDepth++;
     if (token.type === 'list_item_close') listDepth--;
@@ -266,18 +283,30 @@ export function buildSourceWritingStats(markdown: string): WritingStatsIndex {
     }
     if (token.type === 'heading_close') inHeading = false;
     if (token.map) cursor = Math.max(cursor, bodyLines[token.map[0]] ?? cursor);
-    if (token.type === 'html_block') {
+    if (token.type === 'tr_open' && token.map) {
+      const [line] = token.map;
+      const from = bodyLines[line];
+      const raw = markdown.slice(from, bodyLines[line + 1] ?? markdown.length);
+      const prefix = containerPrefixLength(raw, listDepth, quoteDepth);
+      tableCells = locateTableCells(raw.slice(prefix), from + prefix);
+      tableColumn = 0;
+    }
+    if (token.type === 'tr_close') tableCells = null;
+    if (token.type === 'html_block' && token.map) {
       const classification = classifyHtmlBlock(token.content);
+      if (!classification.editable &&
+          (/^\s*<!--/.test(token.content) || isRenderedImageHtml(token.content))) continue;
       const run = emptyRun();
       const positions = locateBlock(
         token.content,
         markdown,
-        bodyLines[token.map![0]],
-        bodyLines[token.map![1]] ?? markdown.length,
-        { list: listDepth > 0, quote: quoteDepth > 0, heading: false },
+        bodyLines[token.map[0]],
+        bodyLines[token.map[1]] ?? markdown.length,
+        listDepth,
+        quoteDepth,
       );
+      if (!positions?.length) continue;
       if (!classification.editable) {
-        if (/^\s*<!--/.test(token.content) || isRenderedImageHtml(token.content)) continue;
         // Unsupported HTML is displayed as literal text by the semantic parser.
         append(run, token.content, positions);
         runs.push(run);
@@ -312,17 +341,27 @@ export function buildSourceWritingStats(markdown: string): WritingStatsIndex {
       runs.push(run);
       cursor = positions.at(-1)! + 1;
     }
-    if (token.type !== 'inline' || !token.content) continue;
+    if (token.type !== 'inline') continue;
+    const tableCell = tableCells?.[tableColumn++];
+    if (!token.content) continue;
+    const original: string = token.meta?.statsContent ?? token.content;
     const inlineStart =
       token.meta?.statsContentColumn !== undefined && token.map
         ? bodyLines[token.map[0]] + token.meta.statsContentColumn
         : cursor;
-    const positions = locateInline(
-      token.meta?.statsContent ?? token.content,
-      markdown,
-      inlineStart,
-      { list: listDepth > 0, quote: quoteDepth > 0, heading: inHeading },
-    );
+    const positions = tableCells
+      ? (tableCell?.text === original ? tableCell.positions : null)
+      : locateInline(
+          original,
+          markdown,
+          inlineStart,
+          token.map ? bodyLines[token.map[1]] ?? markdown.length : markdown.length,
+          listDepth,
+          quoteDepth,
+          inHeading,
+        );
+    // An unmappable token should not prevent opening or indexing the rest of the document.
+    if (!positions?.length) continue;
     cursor = positions.at(-1)! + 1;
     const run = emptyRun();
     let startsWithCode = false;
