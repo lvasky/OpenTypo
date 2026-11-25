@@ -34,6 +34,7 @@
     type EditorCommand,
     type InlinePendingMarks,
   } from '../../lib/editor-core';
+  import { FOOTNOTE_ICON_PATHS } from '../../lib/editor-core/quickInsert';
   import type { EditorViewMode } from '../types';
   import { clickOutside } from '../actions/clickOutside';
   import { modeSwitchIndicator } from '../actions/motion';
@@ -355,7 +356,21 @@
         on:mousedown|preventDefault
         on:click={() => runCommand({ type: 'insertFootnote' })}
       >
-        <Superscript size={17} />
+        <svg
+          width="17"
+          height="17"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.7"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          {#each FOOTNOTE_ICON_PATHS as path}
+            <path d={path} />
+          {/each}
+        </svg>
       </button>
       <button
         title={t.insertToc()}

@@ -3,7 +3,7 @@ import type { EditorView } from 'prosemirror-view';
 import { onInterfaceLocaleChanged, t } from '../../../app/i18n';
 import { insertQuickInsertContent } from '../editorCommands';
 import type { EditorCommand } from '../types';
-import { isQuickInsertTrigger, QUICK_INSERT_CATEGORIES } from '../quickInsert';
+import { FOOTNOTE_ICON_PATHS, isQuickInsertTrigger, QUICK_INSERT_CATEGORIES } from '../quickInsert';
 import { analyzeInlineSource } from '../InlineSourceCodec';
 import { getEmptyInlineTemplateFormats } from './inlineSourceEditing';
 
@@ -214,7 +214,7 @@ export function quickInsertPlugin(getOptions: () => QuickInsertOptions): Plugin 
 
 let nextMenuId = 0;
 
-const ICON_PATHS: Record<string, string[]> = {
+const ICON_PATHS: Record<string, readonly string[]> = {
   heading: ['M6 4v16M18 4v16M6 12h12'],
   list: ['M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01'],
   table: ['M3 3h18v18H3zM3 9h18M9 3v18M3 15h18'],
@@ -222,7 +222,7 @@ const ICON_PATHS: Record<string, string[]> = {
   quote: ['M3 3h7v7H3zM14 3h7v7h-7zM10 10v4a5 5 0 0 1-5 5M21 10v4a5 5 0 0 1-5 5'],
   callout: ['M12 8v4m0 4h.01', 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20'],
   image: ['M3 3h18v18H3zM3 17l6-6 4 4 3-3 5 5', 'M8 7h.01'],
-  footnote: ['M8 18h8', 'M12 18V6l-3 2'],
+  footnote: FOOTNOTE_ICON_PATHS,
   link: [
     'M10 13a5 5 0 0 0 7 .5l3-3a5 5 0 0 0-7-7l-2 2',
     'M14 11a5 5 0 0 0-7-.5l-3 3a5 5 0 0 0 7 7l2-2',

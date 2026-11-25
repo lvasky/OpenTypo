@@ -4,6 +4,11 @@ import type { EditorCommand } from './types';
 
 export const DEFAULT_QUICK_INSERT_TRIGGER = '/';
 
+export const FOOTNOTE_ICON_PATHS = [
+  'M5.5 5.5H2v13h3.5M19.5 5.5H22v13h-2.5',
+  'm7 12.5 3-3 3 3m1.5-1 2.5-2V16',
+] as const;
+
 /** 触发符号只接受一个标点或符号，避免普通文字输入频繁唤起菜单。 */
 export function isQuickInsertTrigger(value: unknown): value is string {
   return typeof value === 'string' && /^[\p{P}\p{S}]$/u.test(value);
