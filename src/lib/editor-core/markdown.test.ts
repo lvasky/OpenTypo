@@ -5,6 +5,7 @@ import { inputRules } from 'prosemirror-inputrules';
 import { createMarkdownInputRules, parseMarkdown, serializeMarkdown } from './markdown';
 import { schema } from './schema';
 import { isInlineSourceText, projectInlineSource } from './InlineSourceCodec';
+import { markdownInlineInputPlugin } from './plugins/markdownInlineInput';
 
 describe('markdown serialization', () => {
   it('preserves blank paragraphs between non-paragraph blocks', () => {
@@ -536,7 +537,7 @@ function createInputRuleView(): { target: HTMLElement; view: EditorView } {
     state: EditorState.create({
       doc,
       selection: TextSelection.create(doc, 1),
-      plugins: [inputRules({ rules: createMarkdownInputRules() })],
+      plugins: [inputRules({ rules: createMarkdownInputRules() }), markdownInlineInputPlugin(() => true)],
     }),
   });
   return { target, view };

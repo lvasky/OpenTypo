@@ -1,15 +1,17 @@
-import { Fragment, type ResolvedPos } from 'prosemirror-model';
+import { Fragment, type Node as ProseMirrorNode, type ResolvedPos } from 'prosemirror-model';
 import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import { t } from '../../../app/i18n';
-import { getInlineMarkdownSource, serializeMarkdown, tryParseMarkdown } from '../markdown';
+import { serializeMarkdown, tryParseMarkdown } from '../markdown';
+import { getInlineMarkdownSource, retainInlineMarkdownSpelling } from '../inlineMarkdownSpelling';
 import { IMAGE_FILE_DELETE_META } from '../nodeViews/ImageNodeView';
+import { FootnoteRefNodeView } from '../nodeViews/FootnoteRefNodeView';
 import { isActiveEditComposing, registerActiveEdit, unregisterActiveEdit } from '../nodeViews/activeEditRegistry';
 
 interface SourceRange {
   from: number;
   content: Fragment;
-  definitionId?: string;
+  definition?: ProseMirrorNode;
 }
 
 interface SourceEditorFocus {
@@ -36,8 +38,8 @@ export function requestMarkdownSourceEditor(tr: Transaction, focus: SourceEditor
 function rangeAt($pos: ResolvedPos, preferBefore = false): SourceRange | null {
   const { parent, parentOffset, pos } = $pos;
   if (!parent.isTextblock || parent.type.spec.code || parent.type.name === 'html_block') return null;
-  if (parent.type.name === 'footnote_def' && parentOffset === 0) {
-    return { from: pos, content: Fragment.empty, definitionId: String(parent.attrs.id) };
+  if (parent.type.name === 'footnote_def') {
+    return { from: $pos.start(), content: parent.content, definition: parent };
   }
   const { nodeBefore, nodeAfter } = $pos;
   const firstAtom = preferBefore ? nodeBefore : nodeAfter;
@@ -67,10 +69,11 @@ function rangeAt($pos: ResolvedPos, preferBefore = false): SourceRange | null {
 }
 
 function sourceText(state: EditorState, range: SourceRange): string {
-  if (range.definitionId !== undefined) return `[^${range.definitionId}]:`;
+  if (range.definition) return serializeMarkdown(state.schema.nodes.doc.create(null, range.definition));
   const { content } = range;
   const first = content.firstChild;
-  if (first?.type.name === 'image' && content.childCount === 1 && !first.marks.length) {
+  if ((first?.type.name === 'image' || first?.type.name === 'footnote_ref') &&
+      content.childCount === 1 && !first.marks.length) {
     const original = getInlineMarkdownSource(first);
     if (original) return original;
   }
@@ -87,10 +90,17 @@ function applySourceEdit(tr: Transaction, from: number, range: SourceRange, sour
   const { doc } = tr;
   const schema = doc.type.schema;
   const $from = doc.resolve(from);
-  if (range.definitionId !== undefined) {
-    if ($from.parent.type !== schema.nodes.footnote_def || $from.parent.attrs.id !== range.definitionId) return;
-    const match = /^\[\^([^\]\s]+)\]:[ \t]*$/.exec(source);
-    if (match) tr.setNodeAttribute($from.before(), 'id', match[1]);
+  if (range.definition) {
+    if (!$from.parent.eq(range.definition)) return;
+    const parsed = tryParseMarkdown(source);
+    const from = $from.before();
+    const to = $from.after();
+    const $block = doc.resolve(from);
+    const index = $block.index();
+    if (parsed && $block.parent.canReplace(index, index + 1, parsed.content)) {
+      retainInlineMarkdownSpelling(parsed.content);
+      tr.replaceWith(from, to, parsed.content).setMeta(IMAGE_FILE_DELETE_META, false);
+    }
     return;
   }
   const end = from + range.content.size;
@@ -102,7 +112,10 @@ function applySourceEdit(tr: Transaction, from: number, range: SourceRange, sour
     : source ? Fragment.from(schema.text(source, [schema.marks.inline_source.create()])) : Fragment.empty;
   const block = $from.parent;
   const next = block.content.cut(0, $from.parentOffset).append(replacement).append(block.content.cut(to));
-  if (block.type.validContent(next)) tr.replaceWith(from, end, replacement).setMeta(IMAGE_FILE_DELETE_META, false);
+  if (block.type.validContent(next)) {
+    retainInlineMarkdownSpelling(replacement);
+    tr.replaceWith(from, end, replacement).setMeta(IMAGE_FILE_DELETE_META, false);
+  }
 }
 
 function createWrappingSourceField(doc: Document, source: string): HTMLSpanElement {
@@ -139,7 +152,8 @@ function createSourceField(
   widget.className = 'pm-markdown-source-widget';
   const original = sourceText(view.state, range);
   const first = range.content.firstChild;
-  const wraps = first?.type.name === 'image' || first?.marks.some((mark) => mark.type.name === 'link');
+  const wraps = range.definition || first?.type.name === 'footnote_ref' ||
+    first?.type.name === 'image' || first?.marks.some((mark) => mark.type.name === 'link');
   const input = wraps ? null : doc.createElement('input');
   const field = input ?? createWrappingSourceField(doc, original);
   if (input) {
@@ -257,6 +271,9 @@ function decorationsFor(state: EditorState, range: SourceRange, focus: SourceEdi
   }, { side: -1, marks: [], stopEvent: () => true, ignoreSelection: true, destroy: () => destroy?.() })];
   const end = range.from + range.content.size;
   const only = range.content.childCount === 1 && range.content.firstChild;
+  if (range.definition) {
+    decorations.push(Decoration.node(range.from - 1, end + 1, { class: 'pm-footnote-definition-expanded' }));
+  }
   if (only && !only.isText) {
     decorations.push(Decoration.node(range.from, end, { class: hiddenClass }));
   } else if (end > range.from) {
@@ -273,12 +290,16 @@ export function openMarkdownSourceAt(view: EditorView, pos: number, side?: -1 | 
   const end = range.from + range.content.size;
   if ((side === -1 && pos === end && pos !== range.from) ||
       (side === 1 && pos === range.from && pos !== end)) return false;
-  const cursor = pos === range.from ? 0 : pos === end ? Number.MAX_SAFE_INTEGER : pos - range.from + 1;
+  const prefixLength = range.definition
+    ? String(range.definition.attrs.sourcePrefix ?? `[^${range.definition.attrs.id}]: `).length
+    : 1;
+  const cursor = pos === range.from ? 0 : pos === end ? Number.MAX_SAFE_INTEGER : pos - range.from + prefixLength;
   const doc = view.state.doc;
   if (!view.hasFocus()) view.focus();
   // Focusing the document can commit a different field that just lost focus.
   if (view.state.doc !== doc) return false;
   const tr = view.state.tr.setSelection(TextSelection.near($pos));
+  if (range.definition || range.content.firstChild?.type.name === 'footnote_ref') FootnoteRefNodeView.closePreviews(view);
   requestMarkdownSourceEditor(tr, { pos, start: cursor, end: cursor, side });
   view.dispatch(tr.setMeta('addToHistory', false));
   return true;
@@ -299,7 +320,7 @@ export function markdownSourceEditorPlugin(): Plugin<SourceState | null> {
         if (!active || !tr.docChanged) return active;
         const from = tr.mapping.map(active.range.from, -1);
         const range = rangeAt(state.doc.resolve(from));
-        return range && range.from === from && range.definitionId === active.range.definitionId &&
+        return range && range.from === from && range.definition === active.range.definition &&
           range.content.eq(active.range.content)
           ? { range, decorations: active.decorations.map(tr.mapping, tr.doc) } : null;
       },

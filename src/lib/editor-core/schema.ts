@@ -292,6 +292,7 @@ export const schema = new Schema({
         defining: true,
         attrs: {
           id: { default: '' },
+          sourcePrefix: { default: null },
         },
         toDOM(node) {
           const id = node.attrs.id as string;

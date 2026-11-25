@@ -79,6 +79,7 @@ import { paragraphSelectionGutterPlugin } from './plugins/paragraphSelectionGutt
 import { codeBlockNavigationPlugin } from './plugins/codeBlockNavigation';
 import { displayMathInputPlugin } from './plugins/displayMathInput';
 import { mathInlineInputPlugin } from './plugins/mathInlineInput';
+import { markdownInlineInputPlugin } from './plugins/markdownInlineInput';
 import { mathInlineDraftPlugin, mathInlineDraftKey, canInsertMathInline, cancelMathInlineDraft } from './plugins/mathInlineDraft';
 import { markdownSourceEditorPlugin, openMarkdownSourceAt } from './plugins/markdownSourceEditor';
 import { linkInteractionPlugin } from './plugins/linkInteraction';
@@ -1699,6 +1700,7 @@ export class ProseMirrorEditorCore implements EditorCore {
         mathInlineInputPlugin(),
         mathInlineDraftPlugin(),
         inlineSourceEditingPlugin({ readonly: () => !this.isEditable() }),
+        markdownInlineInputPlugin(() => this.isEditable()),
         markdownSourceEditorPlugin(),
         linkInteractionPlugin({ openLink: this.options.onOpenLink }),
         codeHighlightPlugin(),

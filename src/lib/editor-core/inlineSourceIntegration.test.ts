@@ -8,6 +8,7 @@ import { DEFAULT_TYPOGRAPHY } from '../typography/types';
 import { schema } from './schema';
 import { parseMarkdown } from './markdown';
 import { QUICK_INSERT_CATEGORIES } from './quickInsert';
+import { inlineSourceEditingPluginKey } from './plugins/inlineSourceEditing';
 
 beforeEach(() => setTypographyOptions({ ...DEFAULT_TYPOGRAPHY, enabled: false }));
 afterEach(() => {
@@ -40,9 +41,7 @@ describe('inline source editor integration', () => {
     try {
       const pos = view.state.doc.child(0).nodeSize + 1 + beforeCaret.length;
       view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)));
-      const handled = view.someProp('handleTextInput', (handler) =>
-        handler(view, pos, pos, ')', () => view.state.tr.insertText(')')));
-      expect(handled).toBe(true);
+      view.dispatch(view.state.tr.insertText(')'));
       expect(target.querySelector('a[href="./scurve"]')?.textContent).toBe('scurve');
       expect(view.state.selection.$from.parentOffset).toBe('打开 scurve'.length);
       expect(editor.flushMarkdown()).toBe(source.replace('./scurve', './scurve)'));
@@ -55,7 +54,7 @@ describe('inline source editor integration', () => {
     ['[label](./a)', 'label', '[label](./b)', 'a[href="./b"]'],
     ['![image](./a.png)', 'image', '![image](./b.png)', '.image-node'],
     ['note [^1]', 'footnote_ref', '[^2]', '.footnote-ref[data-footnote-id="2"]'],
-    ['[^1]: definition', 'footnote_def', '[^2]:', '.footnote-def[data-footnote-id="2"]'],
+    ['[^1]: definition', 'footnote_def', '[^2]: updated definition', '.footnote-def[data-footnote-id="2"]'],
     ['before $x$ after', 'math_inline', '$x^2$', '.math-inline[data-tex="x^2"]'],
   ])('reveals and edits the source for %s at the caret', async (source, targetText, replacement, selector) => {
     const { editor, view, target, destroy } = setup(source);
@@ -74,7 +73,7 @@ describe('inline source editor integration', () => {
       const field = target.querySelector<HTMLElement>('.pm-markdown-source-widget > :first-child');
       expect(document.activeElement).toBe(field);
       expect(field?.closest('.ProseMirror')).toBe(view.dom);
-      if (targetText !== 'footnote_def') expect(target.querySelector('.pm-markdown-source-hidden')).not.toBeNull();
+      expect(target.querySelector('.pm-markdown-source-hidden')).not.toBeNull();
       if (field instanceof HTMLInputElement) field.value = replacement;
       else field!.textContent = replacement;
       field!.blur();
@@ -89,6 +88,8 @@ describe('inline source editor integration', () => {
   it.each([
     `![image](./${'long-image-path-'.repeat(20)}.png 'caption'){width=420 align=center}`,
     `[link](<./${'long link path '.repeat(20)}target> 'title')`,
+    `[^${'footnote-id-'.repeat(20)}]`,
+    `[^id]:  ${'Full **footnote** definition. '.repeat(12).trimEnd()}`,
   ])('reveals the full inline source and keeps the original spelling on blur', async (source) => {
     const { editor, view, target, destroy } = setup(source);
     try {
@@ -101,6 +102,64 @@ describe('inline source editor integration', () => {
       expect(field?.getAttribute('contenteditable')).toBe('plaintext-only');
       field!.blur();
       expect(editor.flushMarkdown()).toBe(source);
+    } finally {
+      destroy();
+    }
+  });
+
+  it.each([
+    ["[name](<./link> 'title')", 'a[href="./link"]'],
+    ["![image](<./img.png> 'caption')", '.image-node'],
+    ['[^long-id]', '.footnote-ref'],
+    ['[^long-id]:  A footnote', '.footnote-def'],
+  ])('recognizes a multi-character insertion of %s without rewriting its source', (source, selector) => {
+    const { editor, view, target, destroy } = setup('');
+    try {
+      view.dispatch(view.state.tr.insertText(source));
+      expect(target.querySelector(selector)).not.toBeNull();
+      expect(editor.flushMarkdown()).toBe(source);
+      expect(editor.execute({ type: 'undo' })).toBe(true);
+      expect(editor.flushMarkdown()).toBe('');
+      expect(editor.execute({ type: 'redo' })).toBe(true);
+      expect(target.querySelector(selector)).not.toBeNull();
+      expect(editor.flushMarkdown()).toBe(source);
+    } finally {
+      destroy();
+    }
+  });
+
+  it.each([
+    ['[name](./li nk)', 'a[href="./link"]'],
+    ['![image](./ima ge.png)', '.image-node'],
+    ['[^foot note]', '.footnote-ref'],
+  ])('recognizes %s after a deletion and reveals the source while the caret is inside', async (source, selector) => {
+    const { editor, view, target, destroy } = setup(source);
+    try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const from = source.indexOf(' ') + 1;
+      const tr = view.state.tr.delete(from, from + 1);
+      view.focus();
+      view.dispatch(tr.setSelection(TextSelection.create(tr.doc, from)));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const field = target.querySelector<HTMLElement>('.pm-markdown-source-text')!;
+      expect(document.activeElement).toBe(field);
+      expect(field.textContent).toBe(source.replace(' ', ''));
+      field.blur();
+      expect(target.querySelector(selector)).not.toBeNull();
+      expect(editor.flushMarkdown()).toBe(source.replace(' ', ''));
+    } finally {
+      destroy();
+    }
+  });
+
+  it('recognizes Markdown on IME commit and preserves escapes and inline code', () => {
+    const { view, target, destroy } = setup('');
+    try {
+      view.dispatch(view.state.tr.setMeta(inlineSourceEditingPluginKey, { composing: true }));
+      view.dispatch(view.state.tr.insertText('[有效](./ok) `[代码](./code)` \\[转义](./literal)'));
+      expect(target.querySelector('a[href="./ok"]')).toBeNull();
+      view.dispatch(view.state.tr.setMeta(inlineSourceEditingPluginKey, { composing: false }));
+      expect(Array.from(target.querySelectorAll('.ProseMirror a')).map((link) => link.textContent)).toEqual(['有效']);
     } finally {
       destroy();
     }

@@ -23,6 +23,10 @@ export class FootnoteRefNodeView {
     }
   }
 
+  static closePreviews(view: EditorView): void {
+    for (const preview of FootnoteRefNodeView.openPreviews.get(view) ?? []) preview.closePreview();
+  }
+
   dom: HTMLElement;
 
   private node: ProseMirrorNode;

@@ -14,13 +14,14 @@ import {
   materializeInlineSource,
 } from './InlineSourceCodec';
 import { rememberTableSources } from './tableSource';
+import { rememberInlineMarkdownSpelling } from './inlineMarkdownSpelling';
 import { serializeMarkdown } from './markdownSerialization';
 export { serializeMarkdown, serializeMarkdownSelection } from './markdownSerialization';
 import { InputRule, textblockTypeInputRule } from 'prosemirror-inputrules';
 import { createListInputRule } from './listCommands';
 import Token from 'markdown-it/lib/token.mjs';
 import { defaultMarkdownParser, MarkdownParser } from 'prosemirror-markdown';
-import { DOMParser as PmDOMParser, Fragment, type Mark, type Node as ProseMirrorNode } from 'prosemirror-model';
+import { DOMParser as PmDOMParser, Fragment, type Node as ProseMirrorNode } from 'prosemirror-model';
 import { TextSelection } from 'prosemirror-state';
 import { schema, type TableColumnAlignment } from './schema';
 import { classifyHtmlBlock, readHtmlInlineAtom, readHtmlTag } from './html/htmlClassifier';
@@ -34,12 +35,6 @@ import { splitFrontMatterBlock } from '../markdown/frontMatter';
 import { parseWithSyncAnchors, type MarkdownSyncAnchor } from './scrollSyncMapping';
 
 const markdownIt = createMarkdownTokenizer({ inlineSource: true });
-const inlineMarkdownSource = new WeakMap<ProseMirrorNode | Mark, string>();
-
-export function getInlineMarkdownSource(node: ProseMirrorNode | Mark): string | undefined {
-  return inlineMarkdownSource.get(node);
-}
-
 function imageTokenAttrs(tok: Token) {
   return {
     src: tok.attrGet('src'),
@@ -76,7 +71,9 @@ const tableMarkdownParser = new MarkdownParser(schema, markdownIt, {
     node: 'footnote_ref',
     getAttrs: (tok: Token) => ({ id: tok.meta?.id ?? tok.content }),
   },
-  footnote_def: { block: 'footnote_def', getAttrs: (tok: Token) => ({ id: tok.meta?.id ?? '' }) },
+  footnote_def: { block: 'footnote_def', getAttrs: (tok: Token) => ({
+    id: tok.meta?.id ?? '', sourcePrefix: tok.meta?.sourcePrefix ?? null,
+  }) },
   math_inline: { node: 'math_inline', getAttrs: (tok: Token) => ({ tex: tok.content }) },
   math_display: { node: 'math_block', getAttrs: (tok: Token) => ({ tex: tok.content }) },
   code_inline: { mark: 'code' },
@@ -504,8 +501,11 @@ tableMarkdownParserWithHandlers.tokenHandlers.inline = (state, token) => {
       const image = state.addNode(schema.nodes.image, imageTokenAttrs(event.token));
       const spelling = source.slice(event.range.from, event.range.to);
       if (image && (spelling.includes('](') || spelling.startsWith('<'))) {
-        inlineMarkdownSource.set(image, spelling);
+        rememberInlineMarkdownSpelling(image, { source: spelling });
       }
+    } else if (event.token.type === 'footnote_ref') {
+      const ref = state.addNode(schema.nodes.footnote_ref, { id: event.token.meta?.id ?? event.token.content });
+      if (ref) rememberInlineMarkdownSpelling(ref, { source: source.slice(event.range.from, event.range.to) });
     } else if (event.token.type === 'link_open') {
       const attrs = createLinkAttrs(event.token.attrGet('href'), event.token.attrGet('title'));
       const mark = schema.marks.link.create(attrs ?? { href: '', title: null });
@@ -513,7 +513,11 @@ tableMarkdownParserWithHandlers.tokenHandlers.inline = (state, token) => {
         const close = events[closeIndex];
         if (close.token.type !== 'link_close') continue;
         if (source.startsWith('](', close.range.from)) {
-          inlineMarkdownSource.set(mark, source.slice(event.range.from, close.range.to));
+          rememberInlineMarkdownSpelling(mark, {
+            source: source.slice(event.range.from, close.range.to),
+            linkOpen: source.slice(event.range.from, event.range.to),
+            linkClose: source.slice(close.range.from, close.range.to),
+          });
         }
         break;
       }
@@ -982,8 +986,6 @@ export function createMarkdownInputRules() {
       return state.tr.replaceWith($start.before(), $start.after(),
         schema.nodes.toc_block.create({ sourceMarker: '[TOC]' }));
     }),
-    createFootnoteDefinitionInputRule(),
-    createMarkdownInlineInputRule(),
     createMathInlineInputRule(),
     textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, (match) => ({
       level: match[1].length,
@@ -994,79 +996,49 @@ export function createMarkdownInputRules() {
   ];
 }
 
-function createFootnoteDefinitionInputRule(): InputRule {
-  return new InputRule(/^\ufffc:$/, (state, _match, start, end) => {
-    const $start = state.doc.resolve(start);
-    const paragraph = $start.parent;
-    const ref = paragraph.firstChild;
-    if (paragraph.type !== schema.nodes.paragraph || paragraph.childCount !== 1 ||
-        ref?.type !== schema.nodes.footnote_ref || start !== $start.start() || end !== $start.end()) return null;
-    const container = $start.node(-1);
-    const index = $start.index(-1);
-    if (!container.canReplaceWith(index, index + 1, schema.nodes.footnote_def)) return null;
-    const tr = state.tr.replaceWith($start.before(), $start.after(), schema.nodes.footnote_def.create(ref.attrs));
-    return tr.setSelection(TextSelection.create(tr.doc, $start.before() + 1));
-  });
-}
-
-function createMarkdownInlineInputRule(): InputRule {
-  // The input-rules plugin only supplies the last 500 characters. Inspect the
-  // current text run so long destinations and earlier escapes are recognized.
-  return new InputRule(/[)\]]$/, (state, match, start, end) => {
-    const $end = state.doc.resolve(end);
-    const block = $end.parent;
-    const $start = state.doc.resolve(start);
-    if (!$start.sameParent($end) || !isInlineSourceBlock(block)) return null;
-
-    const blockStart = $end.start();
-    const toOffset = end - blockStart;
-    const typed = match[0].at(-1)!;
-    const context = block.textBetween(0, $start.parentOffset, '', '\ufffc');
-    const contextStart = context.lastIndexOf('\ufffc') + 1;
-    const source = context.slice(contextStart) + typed;
-    if (!(typed === ']' ? source.includes('[^') : source.includes(']('))) return null;
-    const tokens = markdownIt.parseInline(source, {})[0]?.children ?? [];
-    const last = tokens.at(-1);
-    if (!last || inlineTokenSourceRange(last)?.to !== source.length) return null;
-
-    const token = last.type === 'link_close'
-      ? tokens[findLastIndex(tokens, (part) => part.type === 'link_open')]
-      : last;
-    if (!token || !['link_open', 'image', 'footnote_ref'].includes(token.type)) return null;
+/** Inline candidates recognized by the same tokenizer used when opening a document. */
+export function getInlineMarkdownRanges(source: string): Array<{ from: number; to: number }> {
+  const ranges: Array<{ from: number; to: number }> = [];
+  const tokens = markdownIt.parseInline(source, {})[0]?.children ?? [];
+  let linkFrom: number | undefined;
+  for (const token of tokens) {
     const range = inlineTokenSourceRange(token);
-    if (!range || !/^(?:!?\[)/.test(source.slice(range.from)) ||
-        (token.type === 'link_open' && !normalizeLinkHref(token.attrGet('href')))) return null;
-
-    const fromOffset = contextStart + range.from;
-    const from = blockStart + fromOffset;
-    if (from > start) return null;
-    if (analyzeInlineSource(block).spans.some(
-      (span) => span.type === 'code' && fromOffset < span.closeTo && toOffset > span.openFrom,
-    )) return null;
-
-    for (const marker of source.slice(0, range.from).matchAll(/\\.|`+/g)) {
-      if (marker[0][0] !== '`') continue;
-      const isClosedCode = tokens.some((part) => {
-        if (part.type !== 'code_inline' && part.type !== 'inline_source_code') return false;
-        const code = inlineTokenSourceRange(part);
-        return code && marker.index >= code.from && marker.index < code.to;
-      });
-      if (!isClosedCode) return null;
+    if (!range) continue;
+    if (token.type === 'link_open') {
+      if (source[range.from] === '[' && normalizeLinkHref(token.attrGet('href'))) linkFrom = range.from;
+    } else if (token.type === 'link_close') {
+      if (linkFrom !== undefined && source.startsWith('](', range.from)) {
+        ranges.push({ from: linkFrom, to: range.to });
+      }
+      linkFrom = undefined;
+    } else if (linkFrom === undefined && (
+      token.type === 'footnote_ref' || (token.type === 'image' && source.startsWith('![', range.from))
+    )) {
+      ranges.push(range);
     }
-
-    let canReplace = true;
-    state.doc.nodesBetween(from, end, (node) => {
-      if (node.isInline && (!node.isText || node.marks.some(
-        (mark) => mark.type !== schema.marks.inline_source || mark.attrs.literal === true,
-      ))) canReplace = false;
-    });
-    if (!canReplace) return null;
-
-    const parsed = tryParseMarkdown(source.slice(range.from))?.firstChild;
-    if (parsed?.type !== schema.nodes.paragraph || !parsed.content.size) return null;
-    const next = block.content.cut(0, fromOffset).append(parsed.content).append(block.content.cut(toOffset));
-    return block.type.validContent(next) ? state.tr.replaceWith(from, end, parsed.content) : null;
-  }, { inCodeMark: false });
+  }
+  // An unmatched opener is often the first half of a code span being typed.
+  // Markdown treats it as literal until closed, but live editing must not consume
+  // a link or image before the closing backtick can be entered.
+  let codeBoundary = source.length;
+  if (source.includes('`')) {
+    const protectedRanges = tokens
+      .filter((token) => token.type === 'code_inline' || token.type === 'inline_source_code')
+      .flatMap((token) => inlineTokenSourceRange(token) ?? [])
+      .concat(ranges)
+      .sort((a, b) => a.from - b.from);
+    let codeIndex = 0;
+    for (const match of source.matchAll(/\\.|\x60+/g)) {
+      if (match[0][0] !== '`') continue;
+      const pos = match.index;
+      while (protectedRanges[codeIndex] && protectedRanges[codeIndex].to <= pos) codeIndex++;
+      if (!protectedRanges[codeIndex] || protectedRanges[codeIndex].from > pos) {
+        codeBoundary = pos;
+        break;
+      }
+    }
+  }
+  return ranges.filter((range) => range.from < codeBoundary);
 }
 
 function createMathInlineInputRule(): InputRule {

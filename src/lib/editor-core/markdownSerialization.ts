@@ -17,6 +17,7 @@ import { serializeHtmlBlock, serializeHtmlInlineContent } from './html/pmToHtml'
 import { serializeHtmlAnchorOpen } from './html/htmlAnchor';
 import { serializeCallout } from './callout/calloutSerializer';
 import { TOC_START_MARKER, TOC_END_MARKER } from '../toc/tocMarkers';
+import { retainedInlineMarkdownSpelling } from './inlineMarkdownSpelling';
 import { escapeHtmlAttr } from './markdownTokenizer';
 import { serializeMarkdownLinkDestination, serializeMarkdownLinkTitle } from './link';
 import { analyzeInlineSourceText, escapeInlineSourceLiteral, escapeLiteralBlockSyntax, isInlineSourceText, projectInlineSource, readTaskListMarker } from './InlineSourceCodec';
@@ -151,6 +152,11 @@ const tableMarkdownSerializer = new MarkdownSerializer(
       state.closeBlock(node);
     },
     image(state, node, parent) {
+      const remembered = retainedInlineMarkdownSpelling(node);
+      if (remembered) {
+        state.write(remembered.source);
+        return;
+      }
       const src = String(node.attrs.src ?? '');
       const alt = String(node.attrs.alt ?? '');
       const title = node.attrs.title as string | null;
@@ -210,12 +216,12 @@ const tableMarkdownSerializer = new MarkdownSerializer(
       }
     },
     footnote_ref(state, node) {
-      state.write(`[^${node.attrs.id}]`);
+      state.write(retainedInlineMarkdownSpelling(node)?.source ?? `[^${node.attrs.id}]`);
     },
     footnote_def(state, node) {
       state.ensureNewLine();
       const separator = node.childCount && !/^[ \t]/.test(node.firstChild?.text ?? '') ? ' ' : '';
-      state.write(`[^${node.attrs.id}]:${separator}`);
+      state.write(node.attrs.sourcePrefix ?? `[^${node.attrs.id}]:${separator}`);
       state.renderInline(node);
       state.closeBlock(node);
     },
@@ -296,10 +302,12 @@ const tableMarkdownSerializer = new MarkdownSerializer(
     },
     link: {
       open(_state, mark) {
-        return mark.attrs.html ? serializeHtmlAnchorOpen(mark.attrs) : '[';
+        return mark.attrs.html ? serializeHtmlAnchorOpen(mark.attrs) : retainedInlineMarkdownSpelling(mark)?.linkOpen ?? '[';
       },
       close(_state, mark) {
         if (mark.attrs.html) return '</a>';
+        const remembered = retainedInlineMarkdownSpelling(mark)?.linkClose;
+        if (remembered !== undefined) return remembered;
         const href = serializeMarkdownLinkDestination(String(mark.attrs.href ?? ''));
         const title = mark.attrs.title
           ? ` "${serializeMarkdownLinkTitle(String(mark.attrs.title))}"`

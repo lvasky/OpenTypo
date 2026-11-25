@@ -313,7 +313,7 @@ export function createMarkdownTokenizer(options: { inlineSource?: boolean; liter
       openToken.block = true;
       openToken.map = [startLine, startLine + 1];
       openToken.markup = '[^]:';
-      openToken.meta = { id };
+      openToken.meta = { id, sourcePrefix: lineText.slice(0, lineText.length - content.length) };
 
       const inlineToken = state.push('inline', '', 0);
       inlineToken.content = content;

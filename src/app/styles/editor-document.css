@@ -2404,8 +2404,16 @@
 }
 
 .ProseMirror[contenteditable='true'] .pm-markdown-source-hidden,
-.ProseMirror[contenteditable='true'] .footnote-def:has(.pm-markdown-source-widget) > .footnote-def-marker {
+.ProseMirror[contenteditable='true'] .pm-footnote-definition-expanded > .footnote-def-marker {
   display: none !important;
+}
+
+.ProseMirror .footnote-def.pm-footnote-definition-expanded {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: inherit;
 }
 
 .ProseMirror[contenteditable='false'] .pm-markdown-source-widget {
