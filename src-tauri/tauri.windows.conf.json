@@ -11,6 +11,7 @@
         "minHeight": 640,
         "decorations": false,
         "shadow": true,
+        "zoomHotkeysEnabled": true,
         "visible": false,
         "skipTaskbar": false
       }

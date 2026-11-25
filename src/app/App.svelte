@@ -669,7 +669,8 @@
   let transferredOpenTargetWindowLabel: string | undefined;
   let deferredOpenForwarding: Promise<void> | undefined;
   let drainingDeferredWorkspaceOperations = false;
-  const workspaceItemFeaturesEnabled = getPlatformCapabilities().isWindows;
+  const { isWindows } = getPlatformCapabilities();
+  const workspaceItemFeaturesEnabled = isWindows;
   $: reconcileWorkspaceItems(tabs, activeTabId);
   $: activeComparison = workspaceItems.find((item): item is ComparisonWorkspaceItem => item.id === activeItemId && item.kind === 'comparison') ?? null;
   $: comparisonRuntimes = activeComparison
@@ -7654,7 +7655,7 @@
     handleGlobalAppShortcut(event, commandHandlers, shortcutPreferences);
     if (!event.defaultPrevented && event.ctrlKey && !event.shiftKey && !event.altKey &&
         !event.isComposing && event.key.toLowerCase() === 'v' &&
-        desktopEnabled && getPlatformCapabilities().isWindows && getActiveEditorMode() === 'semantic' &&
+        desktopEnabled && isWindows && getActiveEditorMode() === 'semantic' &&
         event.target instanceof HTMLElement &&
         event.target.closest('.ProseMirror[contenteditable="true"]') &&
         !event.target.closest('input, textarea, [contenteditable="false"]')) {
@@ -7670,12 +7671,16 @@
       event.preventDefault();
       return;
     }
-    if (!ctrlWheelZoomEnabled || !event.ctrlKey) {
+    if (!event.ctrlKey) {
       return;
     }
 
-    const target = event.target as HTMLElement | null;
-    if (!target?.closest('.editor-grid')) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('.image-fullscreen-overlay')) return;
+    // WebView2 sends touchpad pinch as Ctrl+wheel. Prevent page zoom and
+    // apply the app's zoom setting only when the gesture targets the editor.
+    if (desktopEnabled && isWindows) event.preventDefault();
+    if (!ctrlWheelZoomEnabled || !target?.closest('.editor-grid') || !event.deltaY) {
       return;
     }
 

@@ -582,6 +582,7 @@ fn create_transfer_window(app: &AppHandle, snapshot: &TransferSnapshot) -> Resul
     .min_inner_size(920.0, 640.0)
     .decorations(false)
     .visible(false)
+    .zoom_hotkeys_enabled(cfg!(target_os = "windows"))
     .shadow(true);
     if let Some(point) = &snapshot.screen_position {
         // 移动到目标显示器后再应用物理坐标，避免把 DOM 逻辑坐标误当屏幕坐标。

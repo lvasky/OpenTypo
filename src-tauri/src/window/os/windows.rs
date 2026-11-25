@@ -71,6 +71,9 @@ fn disable_browser_shortcuts(
     let label = label.to_string();
     unsafe {
         let settings = controller.CoreWebView2()?.Settings()?;
+        // Wry enables pinch input and browser zoom together before navigation.
+        // Keep pinch input enabled and let the app handle wheel zoom.
+        settings.SetIsZoomControlEnabled(false)?;
         settings
             .cast::<ICoreWebView2Settings3>()?
             .SetAreBrowserAcceleratorKeysEnabled(false)?;

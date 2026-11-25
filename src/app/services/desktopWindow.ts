@@ -112,6 +112,7 @@ export async function createAppWindow(
       minHeight: 640,
       center: true,
       visible: !platformCapabilities.usesCustomWindowsTitlebar,
+      zoomHotkeysEnabled: platformCapabilities.isWindows,
       ...getNewWindowChromeOptions(),
       resizable: true,
       maximizable: true,
