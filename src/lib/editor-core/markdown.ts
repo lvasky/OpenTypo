@@ -20,7 +20,7 @@ import { InputRule, textblockTypeInputRule } from 'prosemirror-inputrules';
 import { createListInputRule } from './listCommands';
 import Token from 'markdown-it/lib/token.mjs';
 import { defaultMarkdownParser, MarkdownParser } from 'prosemirror-markdown';
-import { DOMParser as PmDOMParser, Fragment, type Node as ProseMirrorNode } from 'prosemirror-model';
+import { DOMParser as PmDOMParser, Fragment, type Mark, type Node as ProseMirrorNode } from 'prosemirror-model';
 import { TextSelection } from 'prosemirror-state';
 import { schema, type TableColumnAlignment } from './schema';
 import { classifyHtmlBlock, readHtmlInlineAtom, readHtmlTag } from './html/htmlClassifier';
@@ -34,6 +34,21 @@ import { splitFrontMatterBlock } from '../markdown/frontMatter';
 import { parseWithSyncAnchors, type MarkdownSyncAnchor } from './scrollSyncMapping';
 
 const markdownIt = createMarkdownTokenizer({ inlineSource: true });
+const inlineMarkdownSource = new WeakMap<ProseMirrorNode | Mark, string>();
+
+export function getInlineMarkdownSource(node: ProseMirrorNode | Mark): string | undefined {
+  return inlineMarkdownSource.get(node);
+}
+
+function imageTokenAttrs(tok: Token) {
+  return {
+    src: tok.attrGet('src'),
+    title: tok.attrGet('title') || null,
+    alt: tok.children ? tok.children.map(readImageAltText).join('') : tok.attrGet('alt') ?? '',
+    align: tok.attrGet('align') || null,
+    width: tok.attrGet('width') || null,
+  };
+}
 
 const tableMarkdownParser = new MarkdownParser(schema, markdownIt, {
   ...defaultMarkdownParser.tokens,
@@ -67,13 +82,7 @@ const tableMarkdownParser = new MarkdownParser(schema, markdownIt, {
   code_inline: { mark: 'code' },
   image: {
     node: 'image',
-    getAttrs: (tok: Token) => ({
-      src: tok.attrGet('src'),
-      title: tok.attrGet('title') || null,
-      alt: tok.children ? tok.children.map(readImageAltText).join('') : tok.attrGet('alt') ?? '',
-      align: tok.attrGet('align') || null,
-      width: tok.attrGet('width') || null,
-    }),
+    getAttrs: imageTokenAttrs,
   },
   ...calloutParserTokens,
   details: { block: 'details', getAttrs: tok => ({ defaultOpen: tok.attrGet('open') !== null }) },
@@ -98,7 +107,7 @@ function readImageAltText(token: Token): string {
 
 type HtmlMarkdownParseState = {
   openNode(type: unknown, attrs?: unknown): void;
-  addNode(type: unknown, attrs?: unknown, content?: Fragment): void;
+  addNode(type: unknown, attrs?: unknown, content?: Fragment): ProseMirrorNode | null;
   closeNode(): void;
   openMark(mark: unknown): void;
   closeMark(markType: unknown): void;
@@ -434,10 +443,7 @@ tableMarkdownParserWithHandlers.tokenHandlers.html_inline = (
   }
 };
 
-/**
- * 六类行内格式保留原文字符。只有链接、图片、公式等既有结构继续走原 handler，
- * 不从已经裁剪代码空白或解码转义的 token.content 重建原文。
- */
+/** 保留普通行内格式的原文，同时为已解析的图片和链接记录可展开的 Markdown。 */
 tableMarkdownParserWithHandlers.tokenHandlers.inline = (state, token) => {
   const source = token.content;
   let cursor = 0;
@@ -494,7 +500,25 @@ tableMarkdownParserWithHandlers.tokenHandlers.inline = (state, token) => {
         continue;
       }
     }
-    if (event.token.type === 'text_special' && event.token.info === 'entity') {
+    if (event.token.type === 'image') {
+      const image = state.addNode(schema.nodes.image, imageTokenAttrs(event.token));
+      const spelling = source.slice(event.range.from, event.range.to);
+      if (image && (spelling.includes('](') || spelling.startsWith('<'))) {
+        inlineMarkdownSource.set(image, spelling);
+      }
+    } else if (event.token.type === 'link_open') {
+      const attrs = createLinkAttrs(event.token.attrGet('href'), event.token.attrGet('title'));
+      const mark = schema.marks.link.create(attrs ?? { href: '', title: null });
+      for (let closeIndex = index + 1; closeIndex < events.length; closeIndex++) {
+        const close = events[closeIndex];
+        if (close.token.type !== 'link_close') continue;
+        if (source.startsWith('](', close.range.from)) {
+          inlineMarkdownSource.set(mark, source.slice(event.range.from, close.range.to));
+        }
+        break;
+      }
+      state.openMark(mark);
+    } else if (event.token.type === 'text_special' && event.token.info === 'entity') {
       // 实体保持原来的显示字符，六类语法字符则用真实反斜杠保护其字面含义。
       appendSource(event.token.content.replace(/[\\`*_~^<\[\]$]/g, (char) => `\\${char}`));
     } else {
@@ -503,17 +527,6 @@ tableMarkdownParserWithHandlers.tokenHandlers.inline = (state, token) => {
     cursor = event.range.to;
   }
   appendSource(source.slice(cursor));
-};
-
-// 覆盖 image token handler — 从 tok.attrs 读取 align/width 写入 node
-// 需要在 tableMarkdownParserWithHandlers 定义之后执行
-const defaultImageTokenHandler = tableMarkdownParserWithHandlers.tokenHandlers.image;
-tableMarkdownParserWithHandlers.tokenHandlers.image = (state, tok) => {
-  if (defaultImageTokenHandler) {
-    // image_attrs 行内规则已将 align/width 写入 tok.attrs，
-    // 这里确保它们作为 ProseMirror node attrs 传递
-    defaultImageTokenHandler(state, tok);
-  }
 };
 
 /**

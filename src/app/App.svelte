@@ -3028,12 +3028,15 @@
         editor.refreshSemanticView();
       }
       const targetCoreMode = nextMode === 'split' ? splitActivePane : getCoreModeForView(nextMode);
-      const modeSwitchResult = await (documentRuntimes.get(activeTabId)?.interaction ?? editorInteraction).setMode(
+      const runtime = documentRuntimes.get(activeTabId);
+      const pending = (runtime?.interaction ?? editorInteraction).setMode(
         targetCoreMode,
         anchor,
         true,
         nextMode,
       );
+      if (runtime) runtime.mode = nextMode;
+      const modeSwitchResult = await pending;
       if (modeSwitchResult.status === 'superseded' || mode !== nextMode) {
         return false;
       }

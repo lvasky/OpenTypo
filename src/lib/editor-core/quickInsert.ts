@@ -5,8 +5,8 @@ import type { EditorCommand } from './types';
 export const DEFAULT_QUICK_INSERT_TRIGGER = '/';
 
 export const FOOTNOTE_ICON_PATHS = [
-  'M5.5 5.5H2v13h3.5M19.5 5.5H22v13h-2.5',
-  'm7 12.5 3-3 3 3m1.5-1 2.5-2V16',
+  'M2 18 5.5 8 9 18m-5.8-3.5h4.6M12 18V8h3a2.5 2.5 0 0 1 0 5h-3m3 0a2.5 2.5 0 0 1 0 5h-3',
+  'm20 6 2-1.5V11',
 ] as const;
 
 /** 触发符号只接受一个标点或符号，避免普通文字输入频繁唤起菜单。 */

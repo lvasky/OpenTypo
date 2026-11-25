@@ -2393,6 +2393,16 @@
   letter-spacing: inherit;
 }
 
+.pm-markdown-source-widget.pm-markdown-source-wrapping {
+  display: inline;
+}
+
+.pm-markdown-source-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  outline: none;
+}
+
 .ProseMirror[contenteditable='true'] .pm-markdown-source-hidden,
 .ProseMirror[contenteditable='true'] .footnote-def:has(.pm-markdown-source-widget) > .footnote-def-marker {
   display: none !important;

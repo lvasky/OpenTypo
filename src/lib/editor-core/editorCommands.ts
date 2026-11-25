@@ -621,11 +621,11 @@ export function insertQuickInsertContent(
     case 'insertImageTemplate':
     case 'insertLinkTemplate': {
       const image = command.type === 'insertImageTemplate';
-      const label = image ? t.quickImageTitle() : t.quickLinkName();
+      const label = image ? 'image title' : 'link name';
       const node = image
-        ? schema.nodes.image.create({ alt: label, src: t.quickImageAddress() })
+        ? schema.nodes.image.create({ alt: label, src: 'image-path' })
         : schema.text(label, [
-            schema.marks.link.create({ href: t.quickLinkAddress() }),
+            schema.marks.link.create({ href: 'link-path' }),
             schema.marks.inline_source.create(),
           ]);
       tr.replaceSelectionWith(node, false);
@@ -1143,27 +1143,9 @@ function insertFrontMatterBlock(markdown: string, setMarkdown: MarkdownSetter): 
 }
 
 function insertTocBlock(view: EditorView): boolean {
-  const { state } = view;
-  const { $from, empty } = state.selection;
   const node = schema.nodes.toc_block.create({ sourceMarker: TOC_PLACEHOLDER_MARKER });
-  const tr = state.tr;
-
-  // Keep the directory visible beside its containing block, including when the
-  // caret is inside a list, a table cell, or a nested structure.
-  let pos = $from.pos;
-  if ($from.depth > 0) {
-    const start = $from.before(1);
-    const end = $from.after(1);
-    if (empty && $from.depth === 1 && $from.parent.type === schema.nodes.paragraph && !$from.parent.content.size) {
-      pos = start;
-      tr.replaceWith(start, end, node);
-    } else {
-      pos = $from.pos === start + 1 ? start : end;
-    }
-  }
-  if (!tr.docChanged) tr.insert(pos, node);
-  if (tr.doc.nodeAt(pos) !== node) return false;
-  tr.setSelection(NodeSelection.create(tr.doc, pos));
+  const tr = view.state.tr.insert(0, node);
+  tr.setSelection(NodeSelection.create(tr.doc, 0));
   view.dispatch(closeHistory(tr).scrollIntoView());
   return true;
 }

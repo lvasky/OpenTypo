@@ -2,6 +2,7 @@ import type { Node } from 'prosemirror-model';
 import { removeEmptyTrailingParagraph } from './plugins/trailingParagraph';
 import { parseMarkdownWithSyncAnchors, serializeMarkdown } from './markdown';
 import { preserveTableSource } from './tableSource';
+import { getTocStartInsertion, TOC_PLACEHOLDER_MARKER } from '../toc/tocMarkers';
 
 type BlockRange = { from: number; to: number; pos: number };
 type Patch = { from: number; to: number; text: string };
@@ -240,6 +241,13 @@ export function serializeSourceChange(
   const render: Render = (nodes) => serializeMarkdown(doc.type.create(null, nodes), { strictMarkdown });
   const patches: Patch[] = [];
   for (const { oldStart, oldEnd, newStart, newEnd } of intervals) {
+    const inserted = newStart === 0 && newEnd === 1 ? doc.firstChild : null;
+    if (oldStart === 0 && oldEnd === 0 && inserted?.type.name === 'toc_block' &&
+        inserted.attrs.sourceMarker === TOC_PLACEHOLDER_MARKER) {
+      const { from, insert } = getTocStartInsertion(source);
+      patches.push({ from, to: from, text: insert });
+      continue;
+    }
     if (oldEnd - oldStart === newEnd - newStart) {
       for (let oldIndex = oldStart; oldIndex < oldEnd; oldIndex++) {
         const range = blocks[oldIndex];

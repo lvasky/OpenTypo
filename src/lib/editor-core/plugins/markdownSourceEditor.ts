@@ -2,7 +2,7 @@ import { Fragment, type ResolvedPos } from 'prosemirror-model';
 import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import { t } from '../../../app/i18n';
-import { serializeMarkdown, tryParseMarkdown } from '../markdown';
+import { getInlineMarkdownSource, serializeMarkdown, tryParseMarkdown } from '../markdown';
 import { IMAGE_FILE_DELETE_META } from '../nodeViews/ImageNodeView';
 import { isActiveEditComposing, registerActiveEdit, unregisterActiveEdit } from '../nodeViews/activeEditRegistry';
 
@@ -68,11 +68,16 @@ function rangeAt($pos: ResolvedPos, preferBefore = false): SourceRange | null {
 
 function sourceText(state: EditorState, range: SourceRange): string {
   if (range.definitionId !== undefined) return `[^${range.definitionId}]:`;
-  let content = range.content;
-  const image = content.firstChild;
-  if (image?.type.name === 'image' && content.childCount === 1 && !image.marks.length) {
-    // Keep visual attributes on the image node while editing its Markdown spelling.
-    content = Fragment.from(image.type.create({ ...image.attrs, align: null, width: null }));
+  const { content } = range;
+  const first = content.firstChild;
+  if (first?.type.name === 'image' && content.childCount === 1 && !first.marks.length) {
+    const original = getInlineMarkdownSource(first);
+    if (original) return original;
+  }
+  const link = first?.marks.find((mark) => mark.type.name === 'link');
+  const original = link && getInlineMarkdownSource(link);
+  if (original && tryParseMarkdown(original)?.firstChild?.content.eq(content)) {
+    return original;
   }
   const { doc, paragraph } = state.schema.nodes;
   return serializeMarkdown(doc.create(null, paragraph.create(null, content)));
@@ -92,22 +97,34 @@ function applySourceEdit(tr: Transaction, from: number, range: SourceRange, sour
   const to = end - $from.start();
   if (to > $from.parent.content.size || !range.content.eq($from.parent.content.cut($from.parentOffset, to))) return;
   const parsed = tryParseMarkdown(source)?.firstChild;
-  let replacement = parsed?.type === schema.nodes.paragraph
+  const replacement = parsed?.type === schema.nodes.paragraph
     ? parsed.content
     : source ? Fragment.from(schema.text(source, [schema.marks.inline_source.create()])) : Fragment.empty;
-  const oldImage = range.content.firstChild;
-  const newImage = replacement.firstChild;
-  if (replacement.childCount === 1 && newImage?.type === schema.nodes.image &&
-      range.content.childCount === 1 && oldImage?.type === schema.nodes.image) {
-    replacement = Fragment.from(newImage.type.create(
-      { ...newImage.attrs, align: oldImage.attrs.align, width: oldImage.attrs.width },
-      null,
-      newImage.marks,
-    ));
-  }
   const block = $from.parent;
   const next = block.content.cut(0, $from.parentOffset).append(replacement).append(block.content.cut(to));
   if (block.type.validContent(next)) tr.replaceWith(from, end, replacement).setMeta(IMAGE_FILE_DELETE_META, false);
+}
+
+function createWrappingSourceField(doc: Document, source: string): HTMLSpanElement {
+  const field = doc.createElement('span');
+  field.className = 'pm-markdown-source-text';
+  field.setAttribute('contenteditable', 'plaintext-only');
+  field.setAttribute('role', 'textbox');
+  field.tabIndex = -1;
+  field.textContent = source;
+  field.addEventListener('paste', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const text = event.clipboardData?.getData('text/plain');
+    const selection = doc.getSelection();
+    if (!text || !selection?.rangeCount || !field.contains(selection.anchorNode) || !field.contains(selection.focusNode)) return;
+    const range = selection.getRangeAt(0);
+    const inserted = doc.createTextNode(text.replace(/\r\n?/g, '\n'));
+    range.deleteContents();
+    range.insertNode(inserted);
+    selection.collapse(inserted, inserted.length);
+  });
+  return field;
 }
 
 function createSourceField(
@@ -120,16 +137,24 @@ function createSourceField(
   const win = doc.defaultView!;
   const widget = doc.createElement('span');
   widget.className = 'pm-markdown-source-widget';
-  const input = doc.createElement('input');
-  input.type = 'text';
-  input.spellcheck = false;
-  input.setAttribute('aria-label', t.sourceMode());
   const original = sourceText(view.state, range);
-  input.value = original;
-  widget.append(input);
-  const resize = () => { input.style.inlineSize = `${Math.max(3, Math.min(120, input.value.length + 1))}ch`; };
-  resize();
-  input.addEventListener('input', resize);
+  const first = range.content.firstChild;
+  const wraps = first?.type.name === 'image' || first?.marks.some((mark) => mark.type.name === 'link');
+  const input = wraps ? null : doc.createElement('input');
+  const field = input ?? createWrappingSourceField(doc, original);
+  if (input) {
+    input.type = 'text';
+    input.value = original;
+    const resize = () => { input.style.inlineSize = `${Math.max(3, Math.min(120, input.value.length + 1))}ch`; };
+    resize();
+    input.addEventListener('input', resize);
+  } else {
+    widget.classList.add('pm-markdown-source-wrapping');
+  }
+  field.spellcheck = false;
+  field.setAttribute('aria-label', t.sourceMode());
+  widget.append(field);
+  const readText = () => input?.value ?? field.textContent ?? '';
 
   let closed = false;
   let composing = false;
@@ -145,8 +170,9 @@ function createSourceField(
     if (view.isDestroyed) return;
     const from = getPos();
     const tr = view.state.tr.setMeta(sourceEditorKey, null);
-    if (from !== undefined && save && view.editable && input.value !== original) {
-      applySourceEdit(tr, from, range, input.value);
+    const text = readText();
+    if (from !== undefined && save && view.editable && text !== original) {
+      applySourceEdit(tr, from, range, text);
     }
     if (from !== undefined && move) {
       const end = from + range.content.size;
@@ -158,17 +184,17 @@ function createSourceField(
     if (move) view.focus();
   };
   const exit = () => finish(true);
-  input.addEventListener('focus', () => registerActiveEdit(view, exit, () => {}, {
+  field.addEventListener('focus', () => registerActiveEdit(view, exit, () => {}, {
     exitOnManualSave: true,
     isComposing: () => composing,
     waitForCompositionEnd: () => compositionDone,
   }));
-  input.addEventListener('compositionstart', () => {
+  field.addEventListener('compositionstart', () => {
     win.clearTimeout(compositionEndTimer);
     if (!composing) compositionDone = new Promise<void>((resolve) => { finishComposition = resolve; });
     composing = true;
   });
-  input.addEventListener('compositionend', () => {
+  field.addEventListener('compositionend', () => {
     compositionEndTimer = win.setTimeout(() => {
       composing = false;
       finishComposition();
@@ -177,23 +203,41 @@ function createSourceField(
       finishDeferred?.();
     }, 0);
   });
-  input.addEventListener('blur', exit);
-  input.addEventListener('keydown', (event) => {
+  field.addEventListener('blur', exit);
+  field.addEventListener('keydown', (event) => {
     if (composing || event.isComposing || event.keyCode === 229) return;
-    if (event.key === 'Enter' || event.key === 'Escape') {
+    if (!input && (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'a') {
+      event.preventDefault();
+      doc.getSelection()?.selectAllChildren(field);
+    } else if (event.key === 'Enter' || event.key === 'Escape') {
       event.preventDefault();
       finish(event.key === 'Enter', 1);
-    } else if (!event.shiftKey && input.selectionStart === input.selectionEnd &&
-      ((event.key === 'ArrowLeft' && input.selectionStart === 0) ||
-       (event.key === 'ArrowRight' && input.selectionEnd === input.value.length))) {
-      event.preventDefault();
-      finish(true, event.key === 'ArrowLeft' ? -1 : 1);
+    } else if (!event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+      let offset = input?.selectionStart === input?.selectionEnd ? input?.selectionStart : null;
+      if (!input) {
+        const selection = doc.getSelection();
+        if (!selection?.isCollapsed || !selection.anchorNode || !field.contains(selection.anchorNode)) return;
+        const before = doc.createRange();
+        before.selectNodeContents(field);
+        before.setEnd(selection.anchorNode, selection.anchorOffset);
+        offset = before.toString().length;
+      }
+      const side = event.key === 'ArrowLeft' ? -1 : 1;
+      if (offset === (side === -1 ? 0 : readText().length)) {
+        event.preventDefault();
+        finish(true, side);
+      }
     }
   });
   const frame = win.requestAnimationFrame(() => {
     if (!widget.isConnected || !view.editable || !view.hasFocus()) return;
-    input.focus({ preventScroll: true });
-    input.setSelectionRange(Math.min(focus.start, original.length), Math.min(focus.end, original.length));
+    field.focus({ preventScroll: true });
+    const start = Math.min(focus.start, original.length);
+    const end = Math.min(focus.end, original.length);
+    if (input) input.setSelectionRange(start, end);
+    else if (field.firstChild) {
+      doc.getSelection()?.setBaseAndExtent(field.firstChild, start, field.firstChild, end);
+    }
   });
   return { widget, destroy: () => {
     closed = true;

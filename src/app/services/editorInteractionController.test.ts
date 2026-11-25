@@ -7,6 +7,8 @@ import { createEditorCore } from '../../lib/editor-core';
 
 describe('editorInteractionController viewport layout', () => {
   it('renders a TOC immediately when inserted from the source side of a split view', () => {
+    // The real editor starts an animation ticker that requires asynchronous frames.
+    window.requestAnimationFrame = originalRequestAnimationFrame;
     const target = document.body.appendChild(document.createElement('div'));
     const markdown = '# Heading';
     const editor = createEditorCore({ markdown, target });
@@ -19,7 +21,7 @@ describe('editorInteractionController viewport layout', () => {
     });
     try {
       controller.runCommand({ type: 'insertToc' });
-      expect(sourceTextarea.value).toBe('# Heading\n\n[TOC]');
+      expect(sourceTextarea.value).toBe('[TOC]\n\n# Heading');
       expect(target.querySelector('.toc-link .toc-text')?.textContent).toBe('Heading');
     } finally {
       editor.destroy();

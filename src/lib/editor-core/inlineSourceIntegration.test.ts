@@ -8,7 +8,6 @@ import { DEFAULT_TYPOGRAPHY } from '../typography/types';
 import { schema } from './schema';
 import { parseMarkdown } from './markdown';
 import { QUICK_INSERT_CATEGORIES } from './quickInsert';
-import { t } from '../../app/i18n';
 
 beforeEach(() => setTypographyOptions({ ...DEFAULT_TYPOGRAPHY, enabled: false }));
 afterEach(() => {
@@ -72,12 +71,13 @@ describe('inline source editor integration', () => {
       view.focus();
       expect(view.someProp('handleClick', (handler) => handler(view, pos, new MouseEvent('click')))).toBe(true);
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const input = target.querySelector<HTMLInputElement>('.pm-markdown-source-widget input');
-      expect(document.activeElement).toBe(input);
-      expect(input?.closest('.ProseMirror')).toBe(view.dom);
+      const field = target.querySelector<HTMLElement>('.pm-markdown-source-widget > :first-child');
+      expect(document.activeElement).toBe(field);
+      expect(field?.closest('.ProseMirror')).toBe(view.dom);
       if (targetText !== 'footnote_def') expect(target.querySelector('.pm-markdown-source-hidden')).not.toBeNull();
-      input!.value = replacement;
-      input!.blur();
+      if (field instanceof HTMLInputElement) field.value = replacement;
+      else field!.textContent = replacement;
+      field!.blur();
       expect(target.querySelector('.pm-markdown-source-widget')).toBeNull();
       expect(target.querySelector(selector)).not.toBeNull();
       expect(editor.flushMarkdown()).toContain(replacement);
@@ -87,8 +87,28 @@ describe('inline source editor integration', () => {
   });
 
   it.each([
-    ['image', `![${t.quickImageTitle()}](${t.quickImageAddress()})`, '![New image](./pic.png)'],
-    ['link', `[${t.quickLinkName()}](${t.quickLinkAddress()})`, '[New link](./target)'],
+    `![image](./${'long-image-path-'.repeat(20)}.png 'caption'){width=420 align=center}`,
+    `[link](<./${'long link path '.repeat(20)}target> 'title')`,
+  ])('reveals the full inline source and keeps the original spelling on blur', async (source) => {
+    const { editor, view, target, destroy } = setup(source);
+    try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      view.focus();
+      expect(view.someProp('handleClick', (handler) => handler(view, 1, new MouseEvent('click')))).toBe(true);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const field = target.querySelector<HTMLElement>('.pm-markdown-source-text');
+      expect(field?.textContent).toBe(source);
+      expect(field?.getAttribute('contenteditable')).toBe('plaintext-only');
+      field!.blur();
+      expect(editor.flushMarkdown()).toBe(source);
+    } finally {
+      destroy();
+    }
+  });
+
+  it.each([
+    ['image', '![image title](image-path)', '![New image](./pic.png)'],
+    ['link', '[link name](link-path)', '[New link](./target)'],
     ['footnote', '[^1]\n\n[^1]:', null],
   ] as const)('inserts %s from the quick menu at the trigger', async (id, template, updated) => {
     const { editor, view, target, destroy } = setup('');
@@ -106,11 +126,12 @@ describe('inline source editor integration', () => {
 
       if (updated) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        const input = target.querySelector<HTMLInputElement>('.pm-markdown-source-widget input');
-        expect(document.activeElement).toBe(input);
-        expect(input?.value).toBe(template);
-        input!.value = updated;
-        input!.blur();
+        const field = target.querySelector<HTMLElement>('.pm-markdown-source-text');
+        expect(document.activeElement).toBe(field);
+        expect(field?.textContent).toBe(template);
+        expect(document.getSelection()?.toString()).toBe(id === 'image' ? 'image title' : 'link name');
+        field!.textContent = updated;
+        field!.blur();
         expect(editor.getMarkdown()).toBe(updated);
       } else {
         expect(view.state.selection.$from.parent.type.name).toBe('footnote_def');

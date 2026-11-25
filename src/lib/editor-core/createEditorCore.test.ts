@@ -725,7 +725,7 @@ describe('createEditorCore', () => {
     expect(editor.getMarkdown()).toContain('```mermaid');
   });
 
-  it('inserts a toc block as Markdown at the semantic selection', () => {
+  it('inserts a toc block at the start of the article', () => {
     const target = document.createElement('div');
     const editor = createEditorCore({ markdown: '# 标题1\n\n## 标题2', target });
 
@@ -735,7 +735,7 @@ describe('createEditorCore', () => {
       .toEqual(['标题1', '标题2']);
   });
 
-  it('renders an inserted TOC outside the active list immediately', () => {
+  it('renders an inserted TOC at the start immediately with the caret inside a list', () => {
     const target = document.createElement('div');
     const editor = createEditorCore({ markdown: '# Title\n\n- nested item', target });
     const view = (editor as unknown as { view: EditorView }).view;
@@ -743,10 +743,24 @@ describe('createEditorCore', () => {
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, item.pos + 4)));
 
     expect(editor.execute({ type: 'insertToc' })).toBe(true);
-    expect(view.state.doc.child(2).type.name).toBe('toc_block');
+    expect(view.state.doc.child(0).type.name).toBe('toc_block');
     expect(target.querySelector('.toc-block .toc-text')?.textContent).toBe('Title');
-    expect(editor.getMarkdown()).toBe('# Title\n\n- nested item\n\n[TOC]');
+    expect(editor.getMarkdown()).toBe('[TOC]\n\n# Title\n\n- nested item');
     editor.destroy();
+  });
+
+  it('prepends a TOC to the body without moving the front matter or rewriting existing lines', () => {
+    const target = document.createElement('div');
+    const metadata = '---\r\ntitle: Example\r\n---\r\n';
+    const body = '\r\nHeading\r\n=======\r\n\r\nText';
+    const editor = createEditorCore({ markdown: metadata + body, target });
+    try {
+      expect(editor.execute({ type: 'insertToc' })).toBe(true);
+      expect(target.querySelector('.toc-block .toc-text')?.textContent).toBe('Heading');
+      expect(editor.getMarkdown()).toBe(metadata + '\r\n[TOC]\r\n' + body);
+    } finally {
+      editor.destroy();
+    }
   });
 
   it('updates toc block content when headings change', () => {

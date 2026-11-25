@@ -3,7 +3,7 @@ import { tick } from 'svelte';
 import type { EditorCommand, EditorCore, EditorMode } from '../../lib/editor-core';
 import type { OutlineItem } from '../../lib/outline/outlineService';
 import type { MarkdownSourceEditorHandle } from '../components/markdownSourceEditor';
-import { TOC_PLACEHOLDER_MARKER } from '../../lib/toc/tocMarkers';
+import { getTocStartInsertion } from '../../lib/toc/tocMarkers';
 import { t } from '../i18n';
 import {
   type OutlineScrollAnchor,
@@ -165,7 +165,7 @@ export function createEditorInteractionController(options: EditorInteractionOpti
     const editor = options.getEditor();
     if (command.type === 'insertToc') {
       if (options.getMode() === 'source') {
-        insertTocAtSourceSelection();
+        insertTocAtSourceStart();
         return;
       }
       // In split mode the semantic tree may still be waiting for a source edit.
@@ -177,28 +177,18 @@ export function createEditorInteractionController(options: EditorInteractionOpti
     editor.focus();
   }
 
-  function insertTocAtSourceSelection() {
+  function insertTocAtSourceStart() {
     const sourceEditor = options.getSourceEditor();
+    if (!sourceEditor) return;
     const markdown = options.getEditor().getMarkdown();
-    const selection = sourceEditor?.getSelection();
-    const start = selection?.from ?? markdown.length;
-    const end = selection?.to ?? start;
-    const tocBlock = TOC_PLACEHOLDER_MARKER;
-    const prefix = markdown.slice(0, start);
-    const suffix = markdown.slice(end);
-    const before = prefix.endsWith('\n') || prefix.length === 0 ? '' : '\n\n';
-    const after = suffix.startsWith('\n') || suffix.length === 0 ? '' : '\n\n';
-    const nextMarkdown = `${prefix}${before}${tocBlock}${after}${suffix}`;
-    const nextSelection = prefix.length + before.length + tocBlock.length;
-
-    sourceEditor?.setMarkdown(nextMarkdown, { addToHistory: true });
+    const { from, insert, markerEnd } = getTocStartInsertion(markdown);
+    const next = markdown.slice(0, from) + insert + markdown.slice(from);
+    const selection = next.slice(0, markerEnd).replace(/\r\n/g, '\n').length;
+    sourceEditor.setMarkdown(next, { addToHistory: true });
     if (options.getSplitView?.()) options.getEditor().refreshSemanticView();
     requestAnimationFrame(() => {
-      if (!sourceEditor) {
-        return;
-      }
       sourceEditor.focus();
-      sourceEditor.setSelection(nextSelection);
+      sourceEditor.setSelection(selection);
       syncSourceTextareaHeight();
     });
   }
