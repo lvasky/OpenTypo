@@ -3,9 +3,9 @@ import { isHistoryTransaction } from 'prosemirror-history';
 import { Plugin, PluginKey, TextSelection, type Transaction } from 'prosemirror-state';
 import { Mapping } from 'prosemirror-transform';
 import { isPlainTextPaste } from '../clipboardMarkdown';
-import { isInlineSourceBlock } from '../InlineSourceCodec';
+import { analyzeInlineSource, isInlineSourceBlock } from '../InlineSourceCodec';
 import { getInlineMarkdownSource, retainInlineMarkdownSpelling } from '../inlineMarkdownSpelling';
-import { getInlineMarkdownRanges, tryParseMarkdown } from '../markdown';
+import { getInlineMarkdownRanges, serializeMarkdown, tryParseMarkdown } from '../markdown';
 import { isInlineSourceComposing } from './inlineSourceEditing';
 import { requestMarkdownSourceEditor } from './markdownSourceEditor';
 
@@ -48,6 +48,49 @@ function canPromoteText(doc: ProseMirrorNode, from: number, to: number): boolean
 
 function inlineText(block: ProseMirrorNode): string {
   return block.textBetween(0, block.content.size, '', (node) => node.type.name === 'hard_break' ? '\n' : '\ufffc');
+}
+
+const inlineObjects = new Set(['image', 'footnote_ref', 'math_inline', 'comment_inline', 'html_anchor']);
+
+/** A newly wrapped code span can contain an already rendered link or inline node. */
+function restoreSourceInsideCode(
+  tr: Transaction,
+  block: ProseMirrorNode,
+  pos: number,
+  changes: readonly TextRange[],
+): boolean {
+  const start = pos + 1;
+  const code = analyzeInlineSource(block).spans.filter((span) => span.type === 'code' &&
+    touches(changes, start + span.openFrom, start + span.closeTo));
+  if (!code.length) return false;
+
+  const { doc, paragraph } = tr.doc.type.schema.nodes;
+  const { inline_source } = tr.doc.type.schema.marks;
+  const edits: Array<TextRange & { source: string }> = [];
+  for (let index = 0, offset = 0; index < block.childCount;) {
+    const child = block.child(index);
+    const link = child.marks.find((mark) => mark.type.name === 'link');
+    const from = offset;
+    offset += child.nodeSize;
+    index++;
+    if (link) {
+      while (index < block.childCount && link.isInSet(block.child(index).marks)) {
+        offset += block.child(index++).nodeSize;
+      }
+    } else if (!inlineObjects.has(child.type.name)) {
+      continue;
+    }
+    if (!code.some((span) => from >= span.from && offset <= span.to)) continue;
+    const content = block.content.cut(from, offset);
+    const original = getInlineMarkdownSource(link ?? child);
+    const source = original && (!link || tryParseMarkdown(original)?.firstChild?.content.eq(content))
+      ? original : serializeMarkdown(doc.create(null, paragraph.create(null, content)));
+    if (source) edits.push({ from: start + from, to: start + offset, source });
+  }
+  for (const { from, to, source } of edits.reverse()) {
+    tr.replaceWith(from, to, tr.doc.type.schema.text(source, [inline_source.create()]));
+  }
+  return !!edits.length;
 }
 
 function promoteFootnoteDefinition(
@@ -123,6 +166,9 @@ export function markdownInlineInputPlugin(isEditable: () => boolean): Plugin<Tex
         if (!block) continue;
         let source = inlineText(block);
         if (promoteFootnoteDefinition(tr, block, source, pos, changes)) source = inlineText(tr.doc.nodeAt(pos)!);
+        if (source.includes('`') && restoreSourceInsideCode(tr, tr.doc.nodeAt(pos)!, pos, changes)) {
+          source = inlineText(tr.doc.nodeAt(pos)!);
+        }
         if (!source.includes('](') && !source.includes('[^')) continue;
 
         const mappedChanges = changes.map(({ from, to }) => ({

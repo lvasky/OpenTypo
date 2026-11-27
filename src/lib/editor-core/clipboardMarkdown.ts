@@ -28,16 +28,23 @@ export function classifyClipboardMarkdown(text: string): ClipboardMarkdownClassi
     : { kind: 'markdown', doc: markdownDoc };
 }
 
-export function createPlainTextSlice(text: string, $context: ResolvedPos, inheritedMarks?: readonly Mark[]): Slice {
+export function createPlainTextSlice(
+  text: string,
+  $context: ResolvedPos,
+  inheritedMarks?: readonly Mark[],
+  preserveVerbatim = false,
+): Slice {
   const literal = normalizeClipboardText(text);
-  const richContext = Array.from({ length: $context.depth }, (_, i) => $context.node(i + 1))
-    .some((node) => node.type.spec.code || node.type.name === 'html_block');
-  const marks = richContext ? $context.marks() : [
-    ...(inheritedMarks ?? $context.marks()).filter((mark) => mark.type.name === 'link'),
-    schema.marks.inline_source.create(),
-  ];
+  const ancestors = Array.from({ length: $context.depth }, (_, i) => $context.node(i + 1));
+  const richContext = ancestors.some((node) => node.type.spec.code || node.type.name === 'html_block');
+  const links = (inheritedMarks ?? $context.marks()).filter((mark) => mark.type.name === 'link');
+  const escapedCellBoundary = /\\(?=[|\n])/.test(literal) && ancestors.some((node) => node.type === schema.nodes.table);
+  const verbatim = preserveVerbatim && !links.length && !escapedCellBoundary;
+  const marks = richContext ? $context.marks() : [...links, schema.marks.inline_source.create({ literal: verbatim, verbatim })];
   return Slice.maxOpen(Fragment.fromArray(createPlainTextBlocks(
-    richContext ? literal : escapePlainMarkdownText(literal, marks.some((mark) => mark.type.name === 'link')), marks,
+    richContext || verbatim ? literal : escapePlainMarkdownText(literal, links.length > 0),
+    marks,
+    verbatim,
   )));
 }
 
@@ -68,7 +75,7 @@ function createPlainTextDocument(text: string): ProseMirrorNode {
   return schema.nodes.doc.create(null, createPlainTextBlocks(text, []));
 }
 
-function createPlainTextBlocks(text: string, marks: readonly Mark[]): ProseMirrorNode[] {
+function createPlainTextBlocks(text: string, marks: readonly Mark[], preserveTrailingBreaks = false): ProseMirrorNode[] {
   const paragraphs: ProseMirrorNode[] = [];
   let inlineContent: ProseMirrorNode[] = [];
   let textStart = 0;
@@ -84,6 +91,7 @@ function createPlainTextBlocks(text: string, marks: readonly Mark[]): ProseMirro
   };
 
   for (const match of text.matchAll(/\n+/g)) {
+    if (preserveTrailingBreaks && match.index + match[0].length === text.length) break;
     const lineBreaks = match[0].length;
     appendText(text.slice(textStart, match.index));
     textStart = match.index + lineBreaks;

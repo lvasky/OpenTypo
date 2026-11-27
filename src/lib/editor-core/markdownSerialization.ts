@@ -20,7 +20,7 @@ import { TOC_START_MARKER, TOC_END_MARKER } from '../toc/tocMarkers';
 import { retainedInlineMarkdownSpelling } from './inlineMarkdownSpelling';
 import { escapeHtmlAttr } from './markdownTokenizer';
 import { serializeMarkdownLinkDestination, serializeMarkdownLinkTitle } from './link';
-import { analyzeInlineSourceText, escapeInlineSourceLiteral, escapeLiteralBlockSyntax, isInlineSourceText, projectInlineSource, readTaskListMarker } from './InlineSourceCodec';
+import { analyzeInlineSourceText, escapeInlineSourceLiteral, escapeLiteralBlockSyntax, isInlineSourceText, isLiteralInlineSourceText, isVerbatimInlineSourceText, projectInlineSource, readTaskListMarker } from './InlineSourceCodec';
 
 const paragraphSyntaxRanges = new WeakMap<MarkdownSerializerState, Array<{ from: number; to: number }>>();
 
@@ -227,12 +227,19 @@ const tableMarkdownSerializer = new MarkdownSerializer(
     },
     text(state, node, parent) {
       if (isInlineSourceText(node)) {
-        const from = (state as unknown as { out: string }).out.length;
-        state.text('clipboard' in state.options && state.options.clipboard === true
-          ? minimizeClipboardGreaterThanEscapes(node.text ?? '') : node.text ?? '', false);
-        if (node.marks.some((mark) => mark.type.name === 'inline_source' && mark.attrs.literal === true)) {
-          paragraphSyntaxRanges.get(state)?.push({ from, to: (state as unknown as { out: string }).out.length });
+        const output = state as unknown as { out: string };
+        const from = output.out.length;
+        if (isVerbatimInlineSourceText(node)) {
+          // state.text may add an escape when adjacent text ends with an exclamation mark.
+          for (const [index, line] of (node.text ?? '').split('\n').entries()) {
+            if (index > 0) output.out += '\n';
+            state.write(line);
+          }
+        } else {
+          state.text('clipboard' in state.options && state.options.clipboard === true
+            ? minimizeClipboardGreaterThanEscapes(node.text ?? '') : node.text ?? '', false);
         }
+        if (isLiteralInlineSourceText(node)) paragraphSyntaxRanges.get(state)?.push({ from, to: output.out.length });
         return;
       }
       let escaped = escapeInlineSourceLiteral(node.text ?? '', { linkLabel: node.marks.some((mark) => mark.type.name === 'link') });
@@ -823,12 +830,16 @@ function renderParagraphInline(state: MarkdownSerializerState, node: ProseMirror
     if (span.type === 'code') syntaxRanges.push({ from: from + span.openFrom, to: from + span.closeTo });
   }
   let offset = from;
+  const protectedLines = new Set<number>();
   const content = source.split('\n').map((line, index) => {
     const prefix = index > 0 && line.startsWith(output.delim) ? output.delim : '';
     const body = line.slice(prefix.length);
     const start = offset + prefix.length;
     offset += line.length + 1;
-    if (syntaxRanges.some((range) => start >= range.from && start < range.to)) return line;
+    if (syntaxRanges.some((range) => start >= range.from && start < range.to)) {
+      protectedLines.add(index);
+      return line;
+    }
     // Markdown 会裁掉段首空白或把四列缩进解释为代码；实体保留真实空格与 Tab。
     const indentation = /^[ \t]+(?=\S)/.exec(body)?.[0];
     if (indentation) {
@@ -837,7 +848,7 @@ function renderParagraphInline(state: MarkdownSerializerState, node: ProseMirror
     }
     return prefix + escapeMarkdownBlockStart(body);
   }).join('\n');
-  output.out = output.out.slice(0, from) + escapeLiteralBlockSyntax(content);
+  output.out = output.out.slice(0, from) + escapeLiteralBlockSyntax(content, protectedLines);
 }
 
 function escapeMarkdownBlockStart(text: string): string {

@@ -2,7 +2,7 @@ import type { Node as ProseMirrorNode } from 'prosemirror-model';
 import { Plugin, PluginKey } from 'prosemirror-state';
 import { Decoration, DecorationSet } from 'prosemirror-view';
 import { renderHtmlPreview, sanitizeHtml } from '../utils/html';
-import { isInlineSourceText } from '../InlineSourceCodec';
+import { isInlineSourceText, isVerbatimInlineSourceText } from '../InlineSourceCodec';
 
 const tableHtmlKey = new PluginKey('tableHtml');
 
@@ -71,11 +71,11 @@ function tryParseHtmlBlock(block: {
 }): { pos: number; node: ProseMirrorNode; safeHtml: string } | null {
   // 代码块和 html_block 已有各自的渲染职责，不能再生成 HTML widget
   if (block.node.type.spec.code || block.node.type.name === 'html_block') return null;
-  // 六类内联 HTML 定界符由原文编辑插件处理，不能再次整段替换成不可编辑 widget。
-  if (/^\s*<\/?(?:strong|b|em|i|code|s|del|strike|u|mark)(?:\s|>)/i.test(block.node.textContent) &&
-      Array.from({ length: block.node.childCount }, (_, i) => block.node.child(i)).some(isInlineSourceText)) return null;
   const text = block.node.textContent.trim();
-  if (!/^<(\w+)[^>]*>/.test(text)) return null;
+  if (!/^<(\w+)[^>]*>/.test(text) || block.node.children.some(isVerbatimInlineSourceText)) return null;
+  // 六类内联 HTML 定界符由原文编辑插件处理，不能再次整段替换成不可编辑 widget。
+  if (/^<(?:strong|b|em|i|code|s|del|strike|u|mark)(?:\s|>)/i.test(text) &&
+      block.node.children.some(isInlineSourceText)) return null;
   const safeHtml = sanitizeHtml(text);
   if (!safeHtml) return null;
   return { pos: block.pos, node: block.node, safeHtml };

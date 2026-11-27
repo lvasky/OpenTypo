@@ -23,6 +23,9 @@ describe('editorInteractionController viewport layout', () => {
       controller.runCommand({ type: 'insertToc' });
       expect(sourceTextarea.value).toBe('[TOC]\n\n# Heading');
       expect(target.querySelector('.toc-link .toc-text')?.textContent).toBe('Heading');
+      controller.runCommand({ type: 'insertToc' });
+      expect(sourceTextarea.value).toBe('[TOC]\n\n# Heading');
+      expect(target.querySelectorAll('.toc-block')).toHaveLength(1);
     } finally {
       editor.destroy();
       target.remove();

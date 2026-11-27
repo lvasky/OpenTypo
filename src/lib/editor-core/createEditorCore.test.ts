@@ -733,6 +733,10 @@ describe('createEditorCore', () => {
     expect(editor.getMarkdown()).toBe('[TOC]\n\n# 标题1\n\n## 标题2');
     expect(Array.from(target.querySelectorAll('.toc-link')).map((link) => link.querySelector('.toc-text')?.textContent))
       .toEqual(['标题1', '标题2']);
+    expect(editor.execute({ type: 'insertToc' })).toBe(true);
+    expect(editor.getMarkdown()).toBe('[TOC]\n\n# 标题1\n\n## 标题2');
+    expect(target.querySelectorAll('.toc-block')).toHaveLength(1);
+    editor.destroy();
   });
 
   it('renders an inserted TOC at the start immediately with the caret inside a list', () => {
@@ -2135,8 +2139,9 @@ describe('createEditorCore', () => {
     ).toMatchObject({ format: 'plain' });
     expect(projectInlineSource(view.state.doc).textContent).toBe('**重点** $x$ ~~删除~~');
     expect(findFirstNode(view.state.doc, 'paragraph').node.firstChild?.marks.map((mark) => mark.type.name)).toEqual(['inline_source']);
-    expect(editor.flushMarkdown()).toBe('\\*\\*重点\\*\\* \\$x$ \\~\\~删除\\~\\~');
-    expect(projectInlineSource(parseMarkdown(editor.getMarkdown())).textContent).toBe('**重点** $x$ ~~删除~~');
+    view.dispatch(view.state.tr.insertText('more text ', 1));
+    expect(view.state.doc.firstChild?.children.every((node) => node.isText)).toBe(true);
+    expect(editor.flushMarkdown()).toBe('more text **重点** $x$ ~~删除~~');
     editor.destroy();
   });
 
@@ -2158,31 +2163,29 @@ describe('createEditorCore', () => {
     Object.defineProperty(pasteEvent, 'clipboardData', {
       value: {
         files: [],
-        getData: (type: string) => (type === 'text/plain' ? '# 字面标题' : ''),
+        getData: (type: string) => (type === 'text/plain' ? '[^1] [aa](bb)' : '<h1>Rich text</h1>'),
       },
     });
-    const handled = view.someProp('handlePaste', (handler) =>
-      handler(view, pasteEvent as ClipboardEvent, Slice.empty),
-    );
-
-    expect(handled).toBe(true);
+    view.dom.dispatchEvent(pasteEvent);
     expect(pasteEvent.defaultPrevented).toBe(true);
     expect(view.state.doc.firstChild?.type.name).toBe('paragraph');
-    expect(projectInlineSource(view.state.doc).textContent).toBe('# 字面标题');
-    expect(editor.flushMarkdown()).toBe('\\# 字面标题');
+    expect(projectInlineSource(view.state.doc).textContent).toBe('[^1] [aa](bb)');
+    expect(editor.flushMarkdown()).toBe('[^1] [aa](bb)');
+    expect(target.querySelector('a, .footnote-ref, h1')).toBeNull();
     editor.destroy();
   });
 
-  it('keeps pasted display-math delimiters literal after save and reopen', () => {
+  it('keeps pasted display-math delimiters literal until Markdown is reparsed', () => {
     const target = document.createElement('div');
-    const editor = createEditorCore({ markdown: '', target });
+    const editor = createEditorCore({ markdown: 'Before', target });
+    const view = (editor as unknown as { view: EditorView }).view;
+    const tr = view.state.tr.split(7);
+    view.dispatch(tr.setSelection(TextSelection.atEnd(tr.doc)));
     editor.pasteClipboard({ text: '$$\nE = mc^2\n$$' }, { mode: 'plain' });
-
-    const serialized = editor.flushMarkdown();
-    const reopened = parseMarkdown(serialized);
-    expect(serialized).toContain('\\$\\$');
-    expect(reopened.firstChild?.type.name).toBe('paragraph');
-    expect(projectInlineSource(reopened).textContent).toBe('$$E = mc^2$$');
+    view.dispatch(view.state.tr.insertText('a', 1));
+    expect(view.state.doc.child(1).type.name).toBe('paragraph');
+    expect(editor.flushMarkdown()).toBe('aBefore\n\n$$\nE = mc^2\n$$');
+    expect(parseMarkdown(editor.getMarkdown()).child(1).type.name).toBe('math_block');
     editor.destroy();
   });
 
@@ -2207,10 +2210,8 @@ describe('createEditorCore', () => {
     const view = (editor as unknown as { view: EditorView }).view;
     editor.pasteClipboard({ text }, { mode: 'plain' });
 
-    const pastedText = projectInlineSource(view.state.doc).textContent;
-    const reopened = parseMarkdown(editor.flushMarkdown());
-    expect(reopened.firstChild?.type.name).toBe('paragraph');
-    expect(projectInlineSource(reopened).textContent).toBe(pastedText);
+    expect(view.state.doc.firstChild?.type.name).toBe('paragraph');
+    expect(editor.flushMarkdown()).toBe(text);
     editor.destroy();
   });
 

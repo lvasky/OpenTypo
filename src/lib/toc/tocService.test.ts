@@ -3,12 +3,20 @@ import {
   createTocBlock,
   createTocList,
   extractTocItems,
+  hasTocAtStart,
   hasTocBlock,
   removeTocBlocks,
   updateTocBlocks,
 } from './tocService';
 
 describe('tocService', () => {
+  it('recognizes a directory at the top of the body after front matter and blank lines', () => {
+    expect(hasTocAtStart('---\r\ntitle: Example\r\n---\r\n\r\n  [TOC]  \r\n\r\n# Heading')).toBe(true);
+    expect(hasTocAtStart('\n<!-- toc -->\n<!-- /toc -->\n\n# Heading')).toBe(true);
+    expect(hasTocAtStart('# Heading\n\n[TOC]')).toBe(false);
+    expect(hasTocAtStart('`[TOC]`\n\n# Heading')).toBe(false);
+  });
+
   it('creates nested Markdown links from headings', () => {
     expect(createTocList('# 标题1\n\n## 标题2\n\n### 标题3')).toBe(
       '- [标题1](#标题1)\n  - [标题2](#标题2)\n    - [标题3](#标题3)',

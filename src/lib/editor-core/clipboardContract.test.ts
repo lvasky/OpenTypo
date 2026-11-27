@@ -68,8 +68,13 @@ describe('clipboard and minimal escaping contract', () => {
   it.each([
     '**bold**',
     '*a*',
+    '[^1]',
+    '[aa](bb)',
+    '![aa](bb)',
+    '[TOC]',
     '[label](https://example.com)',
     '<span>x</span>',
+    '<!-- toc -->\n- unchanged\n<!-- /toc -->',
     '&amp;',
     '\\*',
     '# heading',
@@ -79,24 +84,19 @@ describe('clipboard and minimal escaping contract', () => {
     '[ ] task',
     '`x*y`',
     'A\nB',
+    '  leading and trailing  \n\n',
     '$$\nE = mc^2\n$$',
     '| A | B |\n| --- | --- |\n| 1 | 2 |',
   ])(
-    'keeps literal text and stable escapes through five copy/paste/save/reopen cycles: %s',
+    'keeps the plain clipboard text verbatim in the Markdown source: %s',
     (text) => {
-      let { editor } = open();
+      const { editor, view } = open();
       editor.pasteClipboard({ text }, { mode: 'plain' });
-      const first = editor.getMarkdown();
-      for (let i = 0; i < 5; i++) {
-        const saved = editor.getMarkdown();
-        editor.setMarkdown(saved, { reason: 'open-file' });
-        editor.selectAll();
-        expect(editor.getClipboardPayload({ format: 'plain' })?.text).toBe(text);
-        const payload = editor.getClipboardPayload({ format: 'markdown' })!;
-        editor = open().editor;
-        editor.pasteClipboard(payload);
-        expect(editor.getMarkdown()).toBe(first);
-      }
+      expect(editor.getMarkdown()).toBe(text);
+      expect(view.state.doc.firstChild?.type.name).toBe('paragraph');
+      expect(view.dom.querySelector('.html-widget')).toBeNull();
+      editor.selectAll();
+      expect(editor.getClipboardPayload({ format: 'plain' })?.text).toBe(text);
     },
   );
 

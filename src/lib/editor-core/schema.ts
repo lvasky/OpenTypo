@@ -439,7 +439,7 @@ export const schema = new Schema({
       inline_source: {
         inclusive: true,
         excludes: '',
-        attrs: { literal: { default: false } },
+        attrs: { literal: { default: false }, verbatim: { default: false } },
         parseDOM: [{ tag: 'span[data-inline-source]' }],
         toDOM() {
           return ['span', { 'data-inline-source': 'true' }, 0];

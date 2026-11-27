@@ -64,6 +64,14 @@ export function isInlineSourceText(node: ProseMirrorNode): boolean {
   return node.isText && node.marks.some((mark) => mark.type.name === 'inline_source');
 }
 
+export function isLiteralInlineSourceText(node: ProseMirrorNode): boolean {
+  return node.isText && node.marks.some((mark) => mark.type.name === 'inline_source' && mark.attrs.literal === true);
+}
+
+export function isVerbatimInlineSourceText(node: ProseMirrorNode): boolean {
+  return node.isText && node.marks.some((mark) => mark.type.name === 'inline_source' && mark.attrs.verbatim === true);
+}
+
 /** 读取任务项首段起点标记；代码、链接和字面文本不产生任务状态。 */
 export function readTaskListMarker(
   paragraph: ProseMirrorNode,
@@ -72,9 +80,8 @@ export function readTaskListMarker(
   if (
     paragraph.type.name !== 'paragraph' || !first?.isText ||
     first.marks.some((mark) =>
-      formatNames.has(mark.type.name as InlineFormatName) || mark.type.name === 'link' ||
-      (mark.type.name === 'inline_source' && mark.attrs.literal === true),
-    )
+      formatNames.has(mark.type.name as InlineFormatName) || mark.type.name === 'link',
+    ) || isLiteralInlineSourceText(first)
   ) return null;
   const match = /^\[([ xX])\]\s?/.exec(first.text ?? '');
   return match ? { text: match[0], checked: match[1].toLowerCase() === 'x' } : null;
@@ -172,13 +179,14 @@ export function escapeInlineSourceLiteral(text: string, options: { linkLabel?: b
 }
 
 /** Protect block-only syntax while serializing a paragraph that must stay literal. */
-export function escapeLiteralBlockSyntax(source: string): string {
+export function escapeLiteralBlockSyntax(source: string, protectedLines?: ReadonlySet<number>): string {
   if (!source.includes('|') && !source.includes('$$') && !source.includes('[TOC]')) return source;
   const lines = source.split('\n');
   const starts = [0];
   for (let i = 0; i < source.length; i++) if (source[i] === '\n') starts.push(i + 1);
   const code = analyzeInlineSourceText(source).spans.filter((span) => span.type === 'code');
-  const protectedLine = (line: number) => code.some((span) => starts[line] >= span.openFrom && starts[line] < span.closeTo);
+  const protectedLine = (line: number) => protectedLines?.has(line) ||
+    code.some((span) => starts[line] >= span.openFrom && starts[line] < span.closeTo);
   for (const token of tokenizer.parse(source, {})) {
     if (token.type === 'toc_block' && typeof token.meta?.sourceMarker === 'string' && token.map) {
       const line = token.map[0];
@@ -224,9 +232,7 @@ export function analyzeInlineSource(block: ProseMirrorNode): InlineSourceAnalysi
         : '\ufffc'.repeat(child.nodeSize);
     source += text;
     virtualSource += text;
-    const literal = child.marks.some(
-      (mark) => mark.type.name === 'inline_source' && mark.attrs.literal === true,
-    );
+    const literal = isLiteralInlineSourceText(child);
     syntaxSource += literal ? '\ufffc'.repeat(text.length) : text;
     for (let index = 0; index < text.length; index++) sourcePositions.push(offset + index);
   });

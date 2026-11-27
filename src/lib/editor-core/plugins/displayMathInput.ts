@@ -2,6 +2,7 @@ import { Plugin, PluginKey } from 'prosemirror-state';
 import type { Node as ProseMirrorNode } from 'prosemirror-model';
 import { schema } from '../schema';
 import { isPlainTextPaste } from '../clipboardMarkdown';
+import { isLiteralInlineSourceText } from '../InlineSourceCodec';
 
 /**
  * displayMathInput 插件 —— 语义模式下直接输入 $$...$$ 转换为 math_block 节点
@@ -70,9 +71,10 @@ function tryMatchDisplayMath(
   // 顶层节点不会有这个问题，但以防万一
 
   const firstText = first.node.textContent.trim();
+  if (!firstText.startsWith('$$') || first.node.children.some(isLiteralInlineSourceText)) return null;
 
   // 单段文本 $$...$$ 形式。粘贴多行空公式块时，换行可能仍保留在同一段文本中。
-  if (firstText.startsWith('$$') && firstText.endsWith('$$') && firstText.length >= 4) {
+  if (firstText.endsWith('$$') && firstText.length >= 4) {
     const tex = firstText.slice(2, -2).trim();
     if (tex || firstText.includes('\n')) {
       return {
@@ -87,15 +89,13 @@ function tryMatchDisplayMath(
   }
 
   // 多段公式允许首尾内容与 $$ 同行，收集时只去掉分隔符。
-  if (!firstText.startsWith('$$')) return null;
-
   const texLines: string[] = [first.node.textContent.trimStart().slice(2)];
   let foundClose = false;
   let closeIndex = startIndex + 1;
 
   for (let index = startIndex + 1; index < blocks.length; index++) {
     const block = blocks[index];
-    if (block.node.type.name !== 'paragraph') break;
+    if (block.node.type.name !== 'paragraph' || block.node.children.some(isLiteralInlineSourceText)) break;
     const text = block.node.textContent.trimEnd();
     if (text.endsWith('$$')) {
       texLines.push(text.slice(0, -2));

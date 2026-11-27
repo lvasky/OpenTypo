@@ -91,6 +91,7 @@ import {
 } from './plugins/inlineSourceEditing';
 import { toggleInlineSourceFormat, getActiveInlineSourceFormats, replaceInlineSourceCodeText } from './inlineSourceCommands';
 import {
+  isVerbatimInlineSourceText,
   materializeInlineSource,
   materializeInlineSourceWithMapping,
   readTaskListMarker,
@@ -326,6 +327,13 @@ export class ProseMirrorEditorCore implements EditorCore {
             this.requestPlainTextPaste();
           }
           return false;
+        },
+        paste: (_view, event) => {
+          if (!event.clipboardData || !this.consumePlainTextPasteRequest()) return false;
+          const text = event.clipboardData.getData('text/plain');
+          if (text && this.isEditable()) this.insertPlainClipboardText(text, true);
+          event.preventDefault();
+          return true;
         },
         // 视图级属性先于插件运行：三击由此接管后，不再触发插件的按下/拖拽处理。
         mousedown: (view, event) => handleTripleClickByDetail(view, event),
@@ -1017,16 +1025,15 @@ export class ProseMirrorEditorCore implements EditorCore {
     }
 
     const text = input.text ?? '';
+    if (options.mode === 'plain') {
+      return text ? this.insertPlainClipboardText(text, true) : { status: 'rejected', reason: 'no-text' };
+    }
     if (this.view.state.selection.$from.parent.type.spec.code || (text && replaceInlineSourceCodeText(this.view.state, text))) {
       const template = document.createElement('template');
       template.innerHTML = input.html ?? '';
       const literal = text || template.content.textContent || '';
       return literal ? this.insertPlainClipboardText(literal) : { status: 'rejected', reason: 'no-text' };
     }
-    if (options.mode === 'plain') {
-      return text ? this.insertPlainClipboardText(text) : { status: 'rejected', reason: 'no-text' };
-    }
-
     if (input.html) {
       const result = this.insertHtmlClipboard(input.html, text);
       if (result.status === 'rejected' && result.reason === 'unsupported-table') return result;
@@ -1102,8 +1109,7 @@ export class ProseMirrorEditorCore implements EditorCore {
       return true;
     }
     const clipboard = event.clipboardData;
-    const plain = clipboard ? this.consumePlainTextPasteRequest() : false;
-    if (!plain && clipboard) {
+    if (clipboard) {
       const files = Array.from(clipboard.files ?? []);
       const hasImages = getClipboardImageFiles(clipboard).length > 0;
       const couldHaveNativeFiles = mightHaveNativeImageFiles(clipboard);
@@ -1120,7 +1126,7 @@ export class ProseMirrorEditorCore implements EditorCore {
     const codeText = text || this.htmlPasteContexts.get(event)?.text ||
       serializeClipboardText(this.transformInlineSourceSlice(slice, projectInlineSource));
     if (this.view.state.selection.$from.parent.type.name === 'details_summary' &&
-      (plain || !this.canInsertClipboardContent(slice.content))) {
+        !this.canInsertClipboardContent(slice.content)) {
       const result = codeText ? this.insertPlainClipboardText(codeText) : { status: 'rejected', reason: 'no-text' } as EditorPasteResult;
       const context = this.htmlPasteContexts.get(event);
       if (context) context.result = result;
@@ -1134,7 +1140,7 @@ export class ProseMirrorEditorCore implements EditorCore {
       event.preventDefault();
       return true;
     }
-    if (!plain && isInTable(this.view.state) && this.isTableClipboardSlice(slice)) {
+    if (isInTable(this.view.state) && this.isTableClipboardSlice(slice)) {
       const context = findTableContext(this.view.state)!;
       const actualView = this.view;
       let pasteState = actualView.state;
@@ -1164,11 +1170,11 @@ export class ProseMirrorEditorCore implements EditorCore {
         return true;
       }
     }
-    if (!plain && !html && text && this.insertListClipboardShortcut(text)) {
+    if (!html && text && this.insertListClipboardShortcut(text)) {
       event.preventDefault();
       return true;
     }
-    if (!plain && !this.canInsertClipboardContent(slice.content)) {
+    if (!this.canInsertClipboardContent(slice.content)) {
       const context = this.htmlPasteContexts.get(event);
       const fallbackText = text || context?.text || serializeClipboardText(slice);
       const result: EditorPasteResult = !this.isEditable()
@@ -1183,13 +1189,9 @@ export class ProseMirrorEditorCore implements EditorCore {
     }
     if (!clipboard) return false;
 
-    if (!plain) {
-      if (html || !text || classifyClipboardMarkdown(text).kind === 'plain') {
-        return false;
-      }
-    }
+    if (html || !text || classifyClipboardMarkdown(text).kind === 'plain') return false;
 
-    const result = this.pasteClipboard({ text, html }, { mode: plain ? 'plain' : 'auto' });
+    const result = this.pasteClipboard({ text, html });
     event.preventDefault();
     return result.status === 'inserted' || result.reason === 'no-text';
   }
@@ -1228,23 +1230,29 @@ export class ProseMirrorEditorCore implements EditorCore {
     return { status: 'inserted', format: shortcut.converted ? 'markdown' : 'plain' };
   }
 
-  private insertPlainClipboardText(text: string): EditorPasteResult {
+  private insertPlainClipboardText(text: string, preserveVerbatim = false): EditorPasteResult {
     if (!this.view) return { status: 'rejected', reason: 'readonly' };
     const { state } = this.view;
-    if (state.selection.$from.parent.type.name === 'details_summary' && state.selection.$from.sameParent(state.selection.$to)) {
+    const { $from, $to } = state.selection;
+    if ($from.parent.type.name === 'details_summary' && $from.sameParent($to)) {
       const normalized = text.replace(/[\r\n\t]+/g, ' ');
-      const tr = replaceInlineSourceCodeText(state, normalized) ?? state.tr.insertText(normalized);
+      const tr = replaceInlineSourceCodeText(state, normalized) ?? (preserveVerbatim
+        ? state.tr.replaceSelection(createPlainTextSlice(normalized, $from, undefined, true))
+          .removeStoredMark(schema.marks.inline_source)
+        : state.tr.insertText(normalized));
       this.view.dispatch(tr.setMeta(plainTextPasteMeta, true).scrollIntoView());
       return { status: 'inserted', format: 'plain' };
     }
-    const { $from, $to } = state.selection;
     const selectedLinkMarks = !state.selection.empty && $from.sameParent($to)
       ? ($from.nodeAfter?.marks ?? []).filter((mark) => mark.type.name === 'link' && mark.isInSet($to.nodeBefore?.marks ?? [])) : undefined;
     const codeTransaction = state.selection.$from.parent.type.spec.code && state.selection.$from.sameParent(state.selection.$to)
       ? state.tr.insertText(text.replace(/\r\n?/g, '\n')) : replaceInlineSourceCodeText(state, text);
-    const transaction = (codeTransaction ?? state.tr.replaceSelection(createPlainTextSlice(text, state.selection.$from, selectedLinkMarks)))
+    const transaction = (codeTransaction ?? state.tr.replaceSelection(createPlainTextSlice(
+      text, state.selection.$from, selectedLinkMarks, preserveVerbatim,
+    )))
       .setMeta(plainTextPasteMeta, true)
       .scrollIntoView();
+    if (preserveVerbatim && !codeTransaction) transaction.removeStoredMark(schema.marks.inline_source);
     this.view.dispatch(transaction);
     return { status: 'inserted', format: 'plain' };
   }
@@ -2076,22 +2084,25 @@ export class ProseMirrorEditorCore implements EditorCore {
 
     const source = this.sourceFormatMarkdown;
     const baseline = this.sourceFormatDoc ??= this.parseSemanticDocument(source).doc;
-    const preservedSource = serializeSourceChange(removeEmptyTrailingParagraph(pendingDoc), baseline, source, this.runtime.strictMarkdown);
+    const doc = removeEmptyTrailingParagraph(pendingDoc);
+    const preservedSource = serializeSourceChange(doc, baseline, source, this.runtime.strictMarkdown);
     let serializedMarkdown = pendingDoc.eq(baseline)
       ? source
       : pendingDoc.content.eq(baseline.content)
         ? `${String(pendingDoc.attrs.frontMatterPrefix ?? '')}${splitFrontMatter(source).body}`
-        : preservedSource ?? serializeMarkdown(removeEmptyTrailingParagraph(pendingDoc), { strictMarkdown: this.runtime.strictMarkdown });
+        : preservedSource ?? serializeMarkdown(doc, { strictMarkdown: this.runtime.strictMarkdown });
     // Preserve the original line endings at EOF even on whole-document fallback.
     if (preservedSource === null && !pendingDoc.content.eq(baseline.content)) {
       const newline = source.includes('\r\n') ? '\r\n' : '\n';
       const ending = source.match(/(?:\r?\n[ \t]*)+$/)?.[0] ?? '';
-      serializedMarkdown = serializedMarkdown.replace(/\r?\n/g, newline)
-        .replace(/(?:\r?\n[ \t]*)+$/, '') + ending;
+      let last = doc.lastChild;
+      while (last?.lastChild) last = last.lastChild;
+      const hasLiteralEnding = last && isVerbatimInlineSourceText(last) && /\n[ \t\n]*$/.test(last.text ?? '');
+      const rendered = serializedMarkdown.replace(/\r?\n/g, newline);
+      serializedMarkdown = (hasLiteralEnding ? rendered : rendered.replace(/(?:\r?\n[ \t]*)+$/, '')) + ending;
     }
-    // 保留 Markdown 字符串层的 TOC 规范化，但不再因此重建 EditorState。
-    // 语义视图中的 toc_block 已由 tocSyncPlugin 原位同步，历史栈保持不变。
-    this.markdown = updateTocBlocks(serializedMarkdown);
+    // tocSyncPlugin updates actual TOC nodes before serialization.
+    this.markdown = serializedMarkdown;
     this.dirty = this.markdown !== this.originalMarkdown;
     this.semanticViewDirty = false;
     this.emit('content-sync');

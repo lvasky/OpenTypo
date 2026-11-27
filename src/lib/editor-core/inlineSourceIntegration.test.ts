@@ -33,6 +33,37 @@ function setup(markdown: string) {
 }
 
 describe('inline source editor integration', () => {
+  it.each([
+    ['[aa](bb)', 'a[href="bb"]'],
+    ['![aa](bb)', '.image-node'],
+    ['[^1]', '.footnote-ref'],
+    ['$x$', '.math-inline'],
+  ])('shows %s as literal code when wrapping existing syntax in backticks', (source, selector) => {
+    const { editor, view, target, destroy } = setup(source);
+    try {
+      expect(target.querySelector(selector)).not.toBeNull();
+      const tr = view.state.tr.insertText('`', view.state.doc.firstChild!.nodeSize - 1).insertText('`', 1);
+      view.dispatch(tr);
+      expect(target.querySelector(selector)).toBeNull();
+      expect(projectInlineSource(view.state.doc).textContent).toBe(source);
+      expect(editor.flushMarkdown()).toBe('`' + source + '`');
+    } finally {
+      destroy();
+    }
+  });
+
+  it('does not render Markdown syntax typed between backticks', () => {
+    const { editor, view, target, destroy } = setup('');
+    const source = '`[aa](bb) ![img](file.png) [^1] $x$`';
+    try {
+      for (const char of source) view.dispatch(view.state.tr.insertText(char));
+      expect(target.querySelector('a, .image-node, .footnote-ref, .math-inline')).toBeNull();
+      expect(editor.flushMarkdown()).toBe(source);
+    } finally {
+      destroy();
+    }
+  });
+
   it('renders a completed link in the middle of a paragraph without rewriting other blocks', () => {
     const beforeCaret = '打开 [scurve](./scurve';
     const source = '原有标题\n========\n\n' + beforeCaret + ' 后继续输入';

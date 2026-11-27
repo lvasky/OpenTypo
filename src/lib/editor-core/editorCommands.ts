@@ -1143,6 +1143,12 @@ function insertFrontMatterBlock(markdown: string, setMarkdown: MarkdownSetter): 
 }
 
 function insertTocBlock(view: EditorView): boolean {
+  const { doc } = view.state;
+  for (let index = 0; index < doc.childCount; index++) {
+    const block = doc.child(index);
+    if (block.type === schema.nodes.toc_block) return true;
+    if (block.type !== schema.nodes.paragraph || block.content.size > 0) break;
+  }
   const node = schema.nodes.toc_block.create({ sourceMarker: TOC_PLACEHOLDER_MARKER });
   const tr = view.state.tr.insert(0, node);
   tr.setSelection(NodeSelection.create(tr.doc, 0));

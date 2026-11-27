@@ -4,6 +4,7 @@ import { analyzeInlineSourceText, escapeInlineSourceLiteral } from '../editor-co
 import { createMarkdownTokenizer, inlineTokenSourceRange } from '../editor-core/markdownTokenizer';
 import { serializeMarkdown } from '../editor-core/markdownSerialization';
 import { tokenizeMarkdownWithSourceLines } from '../editor-core/markdown';
+import { extractFrontMatterBlock } from '../markdown/frontMatter';
 import type Token from 'markdown-it/lib/token.mjs';
 import { TOC_START_MARKER, TOC_END_MARKER } from './tocMarkers';
 export { TOC_START_MARKER, TOC_END_MARKER } from './tocMarkers';
@@ -59,6 +60,14 @@ export function updateTocBlocks(markdown: string): string {
 
 export function hasTocBlock(markdown: string): boolean {
   return extractTocRanges(markdown).length > 0;
+}
+
+export function hasTocAtStart(markdown: string): boolean {
+  const body = extractFrontMatterBlock(markdown)?.body ?? markdown;
+  const first = body.replace(/^(?:[ \t]*\r?\n)+/, '');
+  if (/^ {0,3}\[TOC\][ \t]*(?:\r?\n|$)/.test(first)) return true;
+  if (!/^ {0,3}<!--[ \t]*toc[ \t]*-->[ \t]*\r?\n/i.test(first)) return false;
+  return tokenizeMarkdownWithSourceLines(first).tokens[0]?.type === 'toc_block';
 }
 
 export function removeTocBlocks(markdown: string): string {

@@ -4,6 +4,7 @@ import type { EditorCommand, EditorCore, EditorMode } from '../../lib/editor-cor
 import type { OutlineItem } from '../../lib/outline/outlineService';
 import type { MarkdownSourceEditorHandle } from '../components/markdownSourceEditor';
 import { getTocStartInsertion } from '../../lib/toc/tocMarkers';
+import { hasTocAtStart } from '../../lib/toc/tocService';
 import { t } from '../i18n';
 import {
   type OutlineScrollAnchor,
@@ -181,6 +182,7 @@ export function createEditorInteractionController(options: EditorInteractionOpti
     const sourceEditor = options.getSourceEditor();
     if (!sourceEditor) return;
     const markdown = options.getEditor().getMarkdown();
+    if (hasTocAtStart(markdown)) return;
     const { from, insert, markerEnd } = getTocStartInsertion(markdown);
     const next = markdown.slice(0, from) + insert + markdown.slice(from);
     const selection = next.slice(0, markerEnd).replace(/\r\n/g, '\n').length;

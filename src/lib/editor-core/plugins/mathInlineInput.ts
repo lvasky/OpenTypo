@@ -2,7 +2,7 @@ import type { Mark, Node as ProseMirrorNode } from 'prosemirror-model';
 import { Plugin } from 'prosemirror-state';
 import { schema } from '../schema';
 import { isPlainTextPaste } from '../clipboardMarkdown';
-import { analyzeInlineSource, isInlineSourceBlock } from '../InlineSourceCodec';
+import { analyzeInlineSource, isInlineSourceBlock, isLiteralInlineSourceText } from '../InlineSourceCodec';
 
 interface InlineMathMatch {
   from: number;
@@ -53,7 +53,7 @@ function findInlineMathTextMatches(doc: ProseMirrorNode): InlineMathMatch[] {
       }
     }
 
-    if (!node.isText || !node.text || hasCodeMark(node)) {
+    if (!node.isText || !node.text || hasCodeMark(node) || isLiteralInlineSourceText(node)) {
       return true;
     }
 
