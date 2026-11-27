@@ -281,6 +281,7 @@ export interface EditorCore {
   pasteClipboardHtml(html: string): boolean;
   deleteSelection(): boolean;
   selectAll(): boolean;
+  isEditingMarkdownSource?(): boolean;
   selectContextTarget(target: ContextMenuTarget): boolean;
   editContextTarget(target: ContextMenuTarget): boolean;
   chooseContextTargetLanguage(target: ContextMenuTarget): boolean;

@@ -3216,10 +3216,15 @@
   }
 
   function handleContextMenuOpen(event: ContextMenuOpenEvent) {
+    const items = event.items.length ? event.items : buildEditorContextMenuItems(event.target);
     openApplicationContextMenu({
       x: event.x,
       y: event.y,
-      items: event.items.length ? event.items : buildEditorContextMenuItems(event.target),
+      items: [
+        ...items,
+        menuSeparator(),
+        { label: t.selectAll(), icon: 'select-all', shortcut: 'Ctrl+A', action: () => editor.selectAll() },
+      ],
     });
   }
 
@@ -3316,12 +3321,6 @@
       },
       commandMenuItem(t.insertInlineComment(), { type: 'insertCommentInline' }, 'edit'),
       menuSeparator(),
-      {
-        label: t.selectAll(),
-        icon: 'select-all',
-        shortcut: 'Ctrl+A',
-        action: () => editor.selectAll(),
-      },
       { label: t.find(), icon: 'search', shortcut: 'Ctrl+F', action: () => openSearchPanel(false) },
     ];
   }
@@ -3353,12 +3352,6 @@
       menuSeparator(),
       { label: t.insert(), icon: 'insert', disabled, children: buildInsertContextMenuItems() },
       menuSeparator(),
-      {
-        label: t.selectAll(),
-        icon: 'select-all',
-        shortcut: 'Ctrl+A',
-        action: () => editor.selectAll(),
-      },
       { label: t.find(), icon: 'search', shortcut: 'Ctrl+F', action: () => openSearchPanel(false) },
     ];
   }
@@ -3618,7 +3611,10 @@
     const revision = pasteTarget?.contentRevision ?? before.contentRevision ?? before.version;
     return trackEditorOperation(async () => {
       try {
-        const content = await readEditorClipboard(desktopEnabled, mode === 'plain' ? 'text' : 'rich');
+        const content = await readEditorClipboard(
+          desktopEnabled,
+          mode === 'plain' || core.isEditingMarkdownSource?.() ? 'text' : 'rich',
+        );
         if (!runtime || runtime.disposed || documentRuntimes.get(sourceTabId) !== runtime) return;
         const current = core.getSnapshot();
         if ((current.contentRevision ?? current.version) !== revision) return;

@@ -2129,7 +2129,7 @@ describe('createEditorCore', () => {
     editor.destroy();
   });
 
-  it('pastes syntax literally without triggering inline mark or math plugins', () => {
+  it('preserves the source while plain-pasted syntax is rendered', () => {
     const target = document.createElement('div');
     const editor = createEditorCore({ markdown: '', target });
     const view = (editor as unknown as { view: EditorView }).view;
@@ -2137,10 +2137,10 @@ describe('createEditorCore', () => {
     expect(
       editor.pasteClipboard({ text: '**重点** $x$ ~~删除~~' }, { mode: 'plain' }),
     ).toMatchObject({ format: 'plain' });
-    expect(projectInlineSource(view.state.doc).textContent).toBe('**重点** $x$ ~~删除~~');
+    expect(editor.getMarkdown()).toBe('**重点** $x$ ~~删除~~');
     expect(findFirstNode(view.state.doc, 'paragraph').node.firstChild?.marks.map((mark) => mark.type.name)).toEqual(['inline_source']);
     view.dispatch(view.state.tr.insertText('more text ', 1));
-    expect(view.state.doc.firstChild?.children.every((node) => node.isText)).toBe(true);
+    expect(view.state.doc.firstChild?.children.some((node) => node.type.name === 'math_inline')).toBe(true);
     expect(editor.flushMarkdown()).toBe('more text **重点** $x$ ~~删除~~');
     editor.destroy();
   });
@@ -2169,13 +2169,14 @@ describe('createEditorCore', () => {
     view.dom.dispatchEvent(pasteEvent);
     expect(pasteEvent.defaultPrevented).toBe(true);
     expect(view.state.doc.firstChild?.type.name).toBe('paragraph');
-    expect(projectInlineSource(view.state.doc).textContent).toBe('[^1] [aa](bb)');
     expect(editor.flushMarkdown()).toBe('[^1] [aa](bb)');
-    expect(target.querySelector('a, .footnote-ref, h1')).toBeNull();
+    expect(target.querySelector('a, h1')).toBeNull();
+    editor.commitPendingEdits(true);
+    expect(target.querySelector('a[href="bb"]')).not.toBeNull();
     editor.destroy();
   });
 
-  it('keeps pasted display-math delimiters literal until Markdown is reparsed', () => {
+  it('preserves the source of a plain-pasted display formula', () => {
     const target = document.createElement('div');
     const editor = createEditorCore({ markdown: 'Before', target });
     const view = (editor as unknown as { view: EditorView }).view;
@@ -2183,7 +2184,7 @@ describe('createEditorCore', () => {
     view.dispatch(tr.setSelection(TextSelection.atEnd(tr.doc)));
     editor.pasteClipboard({ text: '$$\nE = mc^2\n$$' }, { mode: 'plain' });
     view.dispatch(view.state.tr.insertText('a', 1));
-    expect(view.state.doc.child(1).type.name).toBe('paragraph');
+    expect(view.state.doc.child(1).type.name).toBe('math_block');
     expect(editor.flushMarkdown()).toBe('aBefore\n\n$$\nE = mc^2\n$$');
     expect(parseMarkdown(editor.getMarkdown()).child(1).type.name).toBe('math_block');
     editor.destroy();
@@ -2207,10 +2208,8 @@ describe('createEditorCore', () => {
   ])('preserves plain-pasted Markdown syntax across serialization: %s', (text) => {
     const target = document.createElement('div');
     const editor = createEditorCore({ markdown: '', target });
-    const view = (editor as unknown as { view: EditorView }).view;
     editor.pasteClipboard({ text }, { mode: 'plain' });
 
-    expect(view.state.doc.firstChild?.type.name).toBe('paragraph');
     expect(editor.flushMarkdown()).toBe(text);
     editor.destroy();
   });

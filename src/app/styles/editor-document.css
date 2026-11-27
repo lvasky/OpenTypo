@@ -2375,47 +2375,7 @@
 .prosemirror-host .details-menu button:focus-visible { background: var(--md-editor-border); }
 .prosemirror-host .details-default-open[aria-checked="true"]::before { content: '✓ '; }
 
-.pm-markdown-source-widget {
-  display: inline-block;
-  max-inline-size: 100%;
-  vertical-align: baseline;
-}
-
-.pm-markdown-source-widget input {
-  box-sizing: border-box;
-  max-inline-size: 100%;
-  padding: 0;
-  border: 0;
-  outline: none;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-}
-
-.pm-markdown-source-widget.pm-markdown-source-wrapping {
-  display: inline;
-}
-
 .pm-markdown-source-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  outline: none;
-}
-
-.ProseMirror[contenteditable='true'] .pm-markdown-source-hidden,
-.ProseMirror[contenteditable='true'] .pm-footnote-definition-expanded > .footnote-def-marker {
-  display: none !important;
-}
-
-.ProseMirror .footnote-def.pm-footnote-definition-expanded {
-  display: block;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  font-size: inherit;
-}
-
-.ProseMirror[contenteditable='false'] .pm-markdown-source-widget {
-  display: none;
 }

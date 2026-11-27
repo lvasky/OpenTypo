@@ -53,16 +53,14 @@ describe('clipboard and minimal escaping contract', () => {
     expect(editor.getClipboardPayload()?.text).toBe('bold and REG[3:0]');
   });
 
-  it('prefers HTML for ordinary paste, while plain paste uses literal text without HTML styling', () => {
+  it('prefers HTML for ordinary paste, while plain paste writes the text flavor as Markdown source', () => {
     const { editor } = open();
     const input = { text: '**literal**', html: '<p>REG[3:0] <strong>formatted</strong></p>' };
     editor.pasteClipboard(input);
     expect(editor.getMarkdown()).toBe('REG[3:0] **formatted**');
     editor.setMarkdown('');
     editor.pasteClipboard(input, { mode: 'plain' });
-    editor.selectAll();
-    expect(editor.getClipboardPayload({ format: 'plain' })?.text).toBe('**literal**');
-    expect(editor.getMarkdown()).not.toMatch(/<strong>|<span>|<p>/);
+    expect(editor.getMarkdown()).toBe('**literal**');
   });
 
   it.each([
@@ -93,10 +91,9 @@ describe('clipboard and minimal escaping contract', () => {
       const { editor, view } = open();
       editor.pasteClipboard({ text }, { mode: 'plain' });
       expect(editor.getMarkdown()).toBe(text);
-      expect(view.state.doc.firstChild?.type.name).toBe('paragraph');
       expect(view.dom.querySelector('.html-widget')).toBeNull();
       editor.selectAll();
-      expect(editor.getClipboardPayload({ format: 'plain' })?.text).toBe(text);
+      expect(editor.getMarkdown()).toBe(text);
     },
   );
 

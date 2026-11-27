@@ -239,7 +239,9 @@ const tableMarkdownSerializer = new MarkdownSerializer(
           state.text('clipboard' in state.options && state.options.clipboard === true
             ? minimizeClipboardGreaterThanEscapes(node.text ?? '') : node.text ?? '', false);
         }
-        if (isLiteralInlineSourceText(node)) paragraphSyntaxRanges.get(state)?.push({ from, to: output.out.length });
+        if (isLiteralInlineSourceText(node) || isVerbatimInlineSourceText(node)) {
+          paragraphSyntaxRanges.get(state)?.push({ from, to: output.out.length });
+        }
         return;
       }
       let escaped = escapeInlineSourceLiteral(node.text ?? '', { linkLabel: node.marks.some((mark) => mark.type.name === 'link') });

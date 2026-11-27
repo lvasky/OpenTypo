@@ -1,12 +1,13 @@
 import { Fragment, type Node as ProseMirrorNode, type ResolvedPos } from 'prosemirror-model';
-import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
+import { isHistoryTransaction } from 'prosemirror-history';
+import { AllSelection, Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
-import { t } from '../../../app/i18n';
+import { analyzeInlineSource, isInlineSourceBlock } from '../InlineSourceCodec';
 import { serializeMarkdown, tryParseMarkdown } from '../markdown';
 import { getInlineMarkdownSource, retainInlineMarkdownSpelling } from '../inlineMarkdownSpelling';
 import { IMAGE_FILE_DELETE_META } from '../nodeViews/ImageNodeView';
 import { FootnoteRefNodeView } from '../nodeViews/FootnoteRefNodeView';
-import { isActiveEditComposing, registerActiveEdit, unregisterActiveEdit } from '../nodeViews/activeEditRegistry';
+import { isInlineSourceComposing } from './inlineSourceEditing';
 
 interface SourceRange {
   from: number;
@@ -21,18 +22,48 @@ interface SourceEditorFocus {
   side?: -1 | 1;
 }
 
-interface SourceState {
-  range: SourceRange;
-  decorations: DecorationSet;
+interface SourceEdit {
+  from: number;
+  to: number;
+  original?: SourceRange;
+  changed: boolean;
 }
 
-const sourceEditorKey = new PluginKey<SourceState | null>('markdown-source-editor');
-const focusSourceEditor = 'focusMarkdownSourceEditor';
+const sourceEditorKey = new PluginKey<SourceEdit | null>('markdown-source-editor');
+const sourceProjection = 'markdownSourceProjection';
+const finishSourceEdit = 'finishMarkdownSourceEdit';
 const sourceAtomNames = new Set(['image', 'footnote_ref', 'math_inline']);
-const hiddenClass = 'pm-markdown-source-hidden';
 
-export function requestMarkdownSourceEditor(tr: Transaction, focus: SourceEditorFocus): void {
-  tr.setMeta(focusSourceEditor, focus);
+export function isMarkdownSourceProjection(tr: Transaction): boolean {
+  return tr.getMeta(sourceProjection) === true;
+}
+
+export function getMarkdownSourceEdit(state: EditorState): { from: number; to: number } | null {
+  return sourceEditorKey.getState(state) ?? null;
+}
+
+export function isEditingMarkdownSource(state: EditorState): boolean {
+  const edit = sourceEditorKey.getState(state);
+  return !!edit && selectionInEdit(state, edit);
+}
+
+export function commitMarkdownSourceEdit(view: EditorView): void {
+  if (sourceEditorKey.getState(view.state) && !isInlineSourceComposing(view)) {
+    view.dispatch(view.state.tr.setMeta(finishSourceEdit, true));
+  }
+}
+
+function editingMark(state: EditorState) {
+  return state.schema.marks.inline_source.create({ literal: true, verbatim: true });
+}
+
+export function beginMarkdownSourceEdit(tr: Transaction, from: number, to: number): void {
+  if (to <= from) return;
+  const inlineSource = tr.doc.type.schema.marks.inline_source;
+  const mark = inlineSource.create({ literal: true, verbatim: true });
+  tr.removeMark(from, to, inlineSource).addMark(from, to, mark);
+  tr.setMeta(sourceEditorKey, { from, to, changed: true } satisfies SourceEdit);
+  if (tr.selection.empty) tr.setStoredMarks([mark]);
 }
 
 function rangeAt($pos: ResolvedPos, preferBefore = false): SourceRange | null {
@@ -68,8 +99,9 @@ function rangeAt($pos: ResolvedPos, preferBefore = false): SourceRange | null {
   return null;
 }
 
-function sourceText(state: EditorState, range: SourceRange): string {
-  if (range.definition) return serializeMarkdown(state.schema.nodes.doc.create(null, range.definition));
+function sourceText(parentDoc: ProseMirrorNode, range: SourceRange): string {
+  const { schema } = parentDoc.type;
+  if (range.definition) return serializeMarkdown(schema.nodes.doc.create(null, range.definition));
   const { content } = range;
   const first = content.firstChild;
   if ((first?.type.name === 'image' || first?.type.name === 'footnote_ref') &&
@@ -82,252 +114,189 @@ function sourceText(state: EditorState, range: SourceRange): string {
   if (original && tryParseMarkdown(original)?.firstChild?.content.eq(content)) {
     return original;
   }
-  const { doc, paragraph } = state.schema.nodes;
+  const { doc, paragraph } = schema.nodes;
   return serializeMarkdown(doc.create(null, paragraph.create(null, content)));
 }
 
-function applySourceEdit(tr: Transaction, from: number, range: SourceRange, source: string): void {
-  const { doc } = tr;
-  const schema = doc.type.schema;
-  const $from = doc.resolve(from);
+export function requestMarkdownSourceEditor(tr: Transaction, focus: SourceEditorFocus): boolean {
+  const range = rangeAt(tr.doc.resolve(focus.pos), focus.side === 1);
+  if (!range) return false;
+  const source = sourceText(tr.doc, range);
+  if (!source) return false;
+
+  const { schema } = tr.doc.type;
+  const { from } = range;
+  const mark = schema.marks.inline_source.create({ literal: true, verbatim: true });
+  const text = schema.text(source, [mark]);
   if (range.definition) {
-    if (!$from.parent.eq(range.definition)) return;
-    const parsed = tryParseMarkdown(source);
-    const from = $from.before();
-    const to = $from.after();
-    const $block = doc.resolve(from);
-    const index = $block.index();
-    if (parsed && $block.parent.canReplace(index, index + 1, parsed.content)) {
-      retainInlineMarkdownSpelling(parsed.content);
-      tr.replaceWith(from, to, parsed.content).setMeta(IMAGE_FILE_DELETE_META, false);
-    }
-    return;
-  }
-  const end = from + range.content.size;
-  const to = end - $from.start();
-  if (to > $from.parent.content.size || !range.content.eq($from.parent.content.cut($from.parentOffset, to))) return;
-  const parsed = tryParseMarkdown(source)?.firstChild;
-  const replacement = parsed?.type === schema.nodes.paragraph
-    ? parsed.content
-    : source ? Fragment.from(schema.text(source, [schema.marks.inline_source.create()])) : Fragment.empty;
-  const block = $from.parent;
-  const next = block.content.cut(0, $from.parentOffset).append(replacement).append(block.content.cut(to));
-  if (block.type.validContent(next)) {
-    retainInlineMarkdownSpelling(replacement);
-    tr.replaceWith(from, end, replacement).setMeta(IMAGE_FILE_DELETE_META, false);
-  }
-}
-
-function createWrappingSourceField(doc: Document, source: string): HTMLSpanElement {
-  const field = doc.createElement('span');
-  field.className = 'pm-markdown-source-text';
-  field.setAttribute('contenteditable', 'plaintext-only');
-  field.setAttribute('role', 'textbox');
-  field.tabIndex = -1;
-  field.textContent = source;
-  field.addEventListener('paste', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const text = event.clipboardData?.getData('text/plain');
-    const selection = doc.getSelection();
-    if (!text || !selection?.rangeCount || !field.contains(selection.anchorNode) || !field.contains(selection.focusNode)) return;
-    const range = selection.getRangeAt(0);
-    const inserted = doc.createTextNode(text.replace(/\r\n?/g, '\n'));
-    range.deleteContents();
-    range.insertNode(inserted);
-    selection.collapse(inserted, inserted.length);
-  });
-  return field;
-}
-
-function createSourceField(
-  range: SourceRange,
-  view: EditorView,
-  getPos: () => number | undefined,
-  focus: SourceEditorFocus,
-) {
-  const doc = view.dom.ownerDocument;
-  const win = doc.defaultView!;
-  const widget = doc.createElement('span');
-  widget.className = 'pm-markdown-source-widget';
-  const original = sourceText(view.state, range);
-  const first = range.content.firstChild;
-  const wraps = range.definition || first?.type.name === 'footnote_ref' ||
-    first?.type.name === 'image' || first?.marks.some((mark) => mark.type.name === 'link');
-  const input = wraps ? null : doc.createElement('input');
-  const field = input ?? createWrappingSourceField(doc, original);
-  if (input) {
-    input.type = 'text';
-    input.value = original;
-    const resize = () => { input.style.inlineSize = `${Math.max(3, Math.min(120, input.value.length + 1))}ch`; };
-    resize();
-    input.addEventListener('input', resize);
+    tr.replaceWith(from - 1, from + range.content.size + 1, schema.nodes.paragraph.create(null, text));
   } else {
-    widget.classList.add('pm-markdown-source-wrapping');
+    tr.replaceWith(from, from + range.content.size, text);
   }
-  field.spellcheck = false;
-  field.setAttribute('aria-label', t.sourceMode());
-  widget.append(field);
-  const readText = () => input?.value ?? field.textContent ?? '';
-
-  let closed = false;
-  let composing = false;
-  let compositionEndTimer: number | undefined;
-  let compositionDone: Promise<void> = Promise.resolve();
-  let finishComposition = () => {};
-  let deferred: (() => void) | undefined;
-  const finish = (save: boolean, move?: -1 | 1) => {
-    if (closed) return;
-    if (composing) { deferred = () => finish(save, move); return; }
-    closed = true;
-    unregisterActiveEdit(view, exit);
-    if (view.isDestroyed) return;
-    const from = getPos();
-    const tr = view.state.tr.setMeta(sourceEditorKey, null);
-    const text = readText();
-    if (from !== undefined && save && view.editable && text !== original) {
-      applySourceEdit(tr, from, range, text);
-    }
-    if (from !== undefined && move) {
-      const end = from + range.content.size;
-      const pos = move < 0 ? tr.mapping.map(from, -1) : tr.mapping.map(end, 1);
-      tr.setSelection(TextSelection.near(tr.doc.resolve(pos), move));
-    }
-    if (!tr.docChanged) tr.setMeta('addToHistory', false);
-    view.dispatch(tr);
-    if (move) view.focus();
-  };
-  const exit = () => finish(true);
-  field.addEventListener('focus', () => registerActiveEdit(view, exit, () => {}, {
-    exitOnManualSave: true,
-    isComposing: () => composing,
-    waitForCompositionEnd: () => compositionDone,
-  }));
-  field.addEventListener('compositionstart', () => {
-    win.clearTimeout(compositionEndTimer);
-    if (!composing) compositionDone = new Promise<void>((resolve) => { finishComposition = resolve; });
-    composing = true;
-  });
-  field.addEventListener('compositionend', () => {
-    compositionEndTimer = win.setTimeout(() => {
-      composing = false;
-      finishComposition();
-      const finishDeferred = deferred;
-      deferred = undefined;
-      finishDeferred?.();
-    }, 0);
-  });
-  field.addEventListener('blur', exit);
-  field.addEventListener('keydown', (event) => {
-    if (composing || event.isComposing || event.keyCode === 229) return;
-    if (!input && (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'a') {
-      event.preventDefault();
-      doc.getSelection()?.selectAllChildren(field);
-    } else if (event.key === 'Enter' || event.key === 'Escape') {
-      event.preventDefault();
-      finish(event.key === 'Enter', 1);
-    } else if (!event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
-      let offset = input?.selectionStart === input?.selectionEnd ? input?.selectionStart : null;
-      if (!input) {
-        const selection = doc.getSelection();
-        if (!selection?.isCollapsed || !selection.anchorNode || !field.contains(selection.anchorNode)) return;
-        const before = doc.createRange();
-        before.selectNodeContents(field);
-        before.setEnd(selection.anchorNode, selection.anchorOffset);
-        offset = before.toString().length;
-      }
-      const side = event.key === 'ArrowLeft' ? -1 : 1;
-      if (offset === (side === -1 ? 0 : readText().length)) {
-        event.preventDefault();
-        finish(true, side);
-      }
-    }
-  });
-  const frame = win.requestAnimationFrame(() => {
-    if (!widget.isConnected || !view.editable || !view.hasFocus()) return;
-    field.focus({ preventScroll: true });
-    const start = Math.min(focus.start, original.length);
-    const end = Math.min(focus.end, original.length);
-    if (input) input.setSelectionRange(start, end);
-    else if (field.firstChild) {
-      doc.getSelection()?.setBaseAndExtent(field.firstChild, start, field.firstChild, end);
-    }
-  });
-  return { widget, destroy: () => {
-    closed = true;
-    win.cancelAnimationFrame(frame);
-    win.clearTimeout(compositionEndTimer);
-    unregisterActiveEdit(view, exit);
-    finishComposition();
-  } };
+  const to = from + source.length;
+  const start = Math.max(0, Math.min(focus.start, source.length));
+  const end = Math.max(start, Math.min(focus.end, source.length));
+  tr.setSelection(TextSelection.create(tr.doc, from + start, from + end));
+  tr.setMeta(sourceEditorKey, { from, to, original: range, changed: false } satisfies SourceEdit);
+  tr.setMeta(IMAGE_FILE_DELETE_META, false);
+  if (start === end) tr.setStoredMarks([mark]);
+  return true;
 }
 
-function decorationsFor(state: EditorState, range: SourceRange, focus: SourceEditorFocus): DecorationSet {
-  let destroy: (() => void) | undefined;
-  const decorations = [Decoration.widget(range.from, (view, getPos) => {
-    const field = createSourceField(range, view, getPos, focus);
-    destroy = field.destroy;
-    return field.widget;
-  }, { side: -1, marks: [], stopEvent: () => true, ignoreSelection: true, destroy: () => destroy?.() })];
-  const end = range.from + range.content.size;
-  const only = range.content.childCount === 1 && range.content.firstChild;
-  if (range.definition) {
-    decorations.push(Decoration.node(range.from - 1, end + 1, { class: 'pm-footnote-definition-expanded' }));
+function selectionInEdit(state: EditorState, edit: SourceEdit): boolean {
+  if (state.selection instanceof AllSelection) return false;
+  const { from, to, empty } = state.selection;
+  return empty ? from >= edit.from && from <= edit.to : from < edit.to && to > edit.from;
+}
+
+function renderEditedSource(
+  tr: Transaction,
+  from: number,
+  to: number,
+  original: SourceRange | undefined,
+  changed: boolean,
+): boolean {
+  const $from = tr.doc.resolve(from);
+  const $to = tr.doc.resolve(to);
+  const { schema } = tr.doc.type;
+  const source = tr.doc.textBetween(from, to, '', (node) => node.type === schema.nodes.hard_break ? '\n' : '\ufffc');
+  const inCode = analyzeInlineSource($from.parent).spans.some((span) =>
+    span.type === 'code' && $from.parentOffset < span.closeTo && $to.parentOffset > span.openFrom);
+  if (inCode) return false;
+
+  const parsed = changed && source ? tryParseMarkdown(source) : null;
+  const parsedBlock = parsed?.childCount === 1 ? parsed.firstChild : null;
+  const definition = changed ? parsedBlock : original?.definition;
+  if (definition?.type === schema.nodes.footnote_def && from === $from.start() && to === $from.end() &&
+      $from.node(-1).canReplaceWith($from.index(-1), $from.index(-1) + 1, definition.type)) {
+    retainInlineMarkdownSpelling(definition.content);
+    if (!changed || serializeMarkdown(schema.nodes.doc.create(null, definition)) === source) {
+      tr.replaceWith($from.before(), $from.after(), definition);
+      return true;
+    }
   }
-  if (only && !only.isText) {
-    decorations.push(Decoration.node(range.from, end, { class: hiddenClass }));
-  } else if (end > range.from) {
-    decorations.push(Decoration.inline(range.from, end, { class: hiddenClass }));
+
+  let fragment = original?.definition ? undefined : original?.content;
+  if (changed) fragment = parsedBlock?.type === schema.nodes.paragraph ? parsedBlock.content : undefined;
+  if (!fragment || !$from.parent.type.validContent(
+    $from.parent.content.cut(0, $from.parentOffset).append(fragment).append($from.parent.content.cut($to.parentOffset)),
+  )) return false;
+  if (changed) {
+    retainInlineMarkdownSpelling(fragment);
+    // Leave malformed fragments and their original whitespace in the document.
+    if (!parsedBlock?.children.some((node) => !node.isText || node.marks.some((mark) =>
+      mark.type !== schema.marks.inline_source)) ||
+      serializeMarkdown(schema.nodes.doc.create(null, parsedBlock)) !== source) return false;
   }
-  return DecorationSet.create(state.doc, decorations);
+  tr.replaceWith(from, to, fragment);
+  return true;
+}
+
+function finishEdit(state: EditorState, edit: SourceEdit): Transaction {
+  const tr = state.tr.setMeta(sourceEditorKey, null).setMeta(sourceProjection, true)
+    .setMeta(IMAGE_FILE_DELETE_META, false);
+  if (!edit.changed) tr.setMeta('addToHistory', false);
+  const { from, to } = edit;
+  const segments: Array<{ from: number; to: number }> = [];
+  if (from < to) {
+    state.doc.nodesBetween(from, to, (node, pos) => {
+      if (!node.isTextblock) return true;
+      const start = Math.max(from, pos + 1);
+      const end = Math.min(to, pos + node.nodeSize - 1);
+      if (start < end && isInlineSourceBlock(node)) segments.push({ from: start, to: end });
+      return false;
+    });
+  }
+  // Reparse each affected paragraph independently so a real Enter stays a real paragraph break.
+  for (const segment of segments.reverse()) {
+    if (renderEditedSource(tr, segment.from, segment.to, edit.original, edit.changed)) continue;
+    tr.removeMark(segment.from, segment.to, editingMark(state));
+    tr.addMark(segment.from, segment.to, state.schema.marks.inline_source.create({ verbatim: true }));
+  }
+  return tr.removeStoredMark(state.schema.marks.inline_source);
+}
+
+function restoredSourceEdit(state: EditorState, transactions: readonly Transaction[]): SourceEdit | null {
+  const change = transactions.find(isHistoryTransaction)?.changedRange();
+  if (!change) return null;
+  const from = Math.min(change.from, state.doc.content.size);
+  const to = Math.min(change.to, state.doc.content.size);
+  const mark = editingMark(state);
+  let range: SourceEdit | null = null;
+  state.doc.nodesBetween(Math.max(0, from - 1), Math.min(to + 1, state.doc.content.size), (node, pos) => {
+    if (!node.isText || !mark.isInSet(node.marks)) return;
+    range = { from: range?.from ?? pos, to: pos + node.nodeSize, changed: true };
+  });
+  return range;
 }
 
 export function openMarkdownSourceAt(view: EditorView, pos: number, side?: -1 | 1): boolean {
-  if (!view.editable || isActiveEditComposing(view)) return false;
-  const $pos = view.state.doc.resolve(pos);
+  if (!view.editable || isInlineSourceComposing(view)) return false;
+  const active = sourceEditorKey.getState(view.state);
+  if (active && pos >= active.from && pos <= active.to) {
+    // Arrow keys can leave an entire range even when it occupies the full paragraph.
+    if ((side === -1 && pos === active.to) || (side === 1 && pos === active.from)) {
+      commitMarkdownSourceEdit(view);
+      return true;
+    }
+    return false;
+  }
+  const { state } = view;
+  const $pos = state.doc.resolve(pos);
   const range = rangeAt($pos, side === 1);
   if (!range) return false;
   const end = range.from + range.content.size;
   if ((side === -1 && pos === end && pos !== range.from) ||
       (side === 1 && pos === range.from && pos !== end)) return false;
+  if (active) {
+    const close = finishEdit(state, active);
+    const mapped = close.mapping.map(pos, side ?? 1);
+    view.dispatch(close);
+    return openMarkdownSourceAt(view, mapped, side);
+  }
   const prefixLength = range.definition
     ? String(range.definition.attrs.sourcePrefix ?? `[^${range.definition.attrs.id}]: `).length
     : 1;
   const cursor = pos === range.from ? 0 : pos === end ? Number.MAX_SAFE_INTEGER : pos - range.from + prefixLength;
-  const doc = view.state.doc;
-  if (!view.hasFocus()) view.focus();
-  // Focusing the document can commit a different field that just lost focus.
-  if (view.state.doc !== doc) return false;
-  const tr = view.state.tr.setSelection(TextSelection.near($pos));
+  const tr = state.tr.setMeta('addToHistory', false).setMeta(sourceProjection, true);
+  if (!requestMarkdownSourceEditor(tr, { pos, start: cursor, end: cursor, side })) return false;
   if (range.definition || range.content.firstChild?.type.name === 'footnote_ref') FootnoteRefNodeView.closePreviews(view);
-  requestMarkdownSourceEditor(tr, { pos, start: cursor, end: cursor, side });
-  view.dispatch(tr.setMeta('addToHistory', false));
+  view.dispatch(tr);
+  if (!view.hasFocus()) view.focus();
   return true;
 }
 
-export function markdownSourceEditorPlugin(): Plugin<SourceState | null> {
-  return new Plugin<SourceState | null>({
+export function markdownSourceEditorPlugin(): Plugin<SourceEdit | null> {
+  return new Plugin<SourceEdit | null>({
     key: sourceEditorKey,
     state: {
       init: () => null,
-      apply(tr, active, _old, state) {
-        if (tr.getMeta(sourceEditorKey) === null) return null;
-        const focus = tr.getMeta(focusSourceEditor) as SourceEditorFocus | undefined;
-        if (focus) {
-          const range = rangeAt(state.doc.resolve(focus.pos), focus.side === 1);
-          return range ? { range, decorations: decorationsFor(state, range, focus) } : null;
-        }
+      apply(tr, active) {
+        const requested = tr.getMeta(sourceEditorKey) as SourceEdit | null | undefined;
+        if (requested !== undefined) return requested;
         if (!active || !tr.docChanged) return active;
-        const from = tr.mapping.map(active.range.from, -1);
-        const range = rangeAt(state.doc.resolve(from));
-        return range && range.from === from && range.definition === active.range.definition &&
-          range.content.eq(active.range.content)
-          ? { range, decorations: active.decorations.map(tr.mapping, tr.doc) } : null;
+        const from = tr.mapping.map(active.from, -1);
+        const to = tr.mapping.map(active.to, 1);
+        const range = tr.changedRange();
+        const changed = active.changed || !!range && range.from <= to && range.to >= from;
+        return { ...active, from, to, changed };
       },
+    },
+    appendTransaction(transactions, _old, state) {
+      const active = sourceEditorKey.getState(state) ?? restoredSourceEdit(state, transactions);
+      if (!active || isInlineSourceComposing(state)) return null;
+      // Keep the representation change in the undo/redo operation that restored the text.
+      if (transactions.some((tr) => isHistoryTransaction(tr) || tr.getMeta(finishSourceEdit)) || !selectionInEdit(state, active)) {
+        return finishEdit(state, active);
+      }
+      return null;
     },
     props: {
       decorations(state) {
-        return this.getState(state)?.decorations;
+        const range = sourceEditorKey.getState(state);
+        return range && range.from < range.to
+          ? DecorationSet.create(state.doc, [Decoration.inline(range.from, range.to, { class: 'pm-markdown-source-text' })])
+          : null;
       },
       handleClick(view, pos, event) {
         if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return false;
@@ -340,10 +309,16 @@ export function markdownSourceEditorPlugin(): Plugin<SourceState | null> {
         if (event.key === 'ArrowLeft') return openMarkdownSourceAt(view, view.state.selection.from, 1);
         return false;
       },
+      handleDOMEvents: {
+        blur(view, event) {
+          if (event.relatedTarget instanceof Element && event.relatedTarget.closest('.context-menu')) return false;
+          if (view.state.selection.empty) commitMarkdownSourceEdit(view);
+          return false;
+        },
+      },
     },
     view(view) {
-      // Footnote buttons own their normal mouse events. Ordinary clicks edit
-      // their source; Ctrl/Cmd-click still follows the reference.
+      // The footnote buttons still own clicks while rendered.
       const onMouseDown = (event: MouseEvent) => {
         if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey ||
             !(event.target instanceof Element)) return;

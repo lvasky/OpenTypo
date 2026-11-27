@@ -837,6 +837,25 @@
     if (outlineAutoScrollFrame) cancelAnimationFrame(outlineAutoScrollFrame);
   });
 
+  function handleSourceContextMenu(event: MouseEvent) {
+    const source = sourceEditor;
+    if (!source || !(event.target instanceof Element) || !event.target.closest('.cm-editor')) return;
+    event.preventDefault();
+    openContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      items: [{
+        label: t.selectAll(),
+        icon: 'select-all',
+        shortcut: 'Ctrl+A',
+        action: () => {
+          source.setSelection(0, source.getMarkdown().length);
+          source.focus();
+        },
+      }],
+    });
+  }
+
   function handleSemanticContextMenu(event: MouseEvent) {
     const target = event.target as HTMLElement | null;
     if (!target || target.closest('input, textarea, select')) {
@@ -958,7 +977,7 @@
       class:split-pane-right={splitViewLayout === 'semantic-source'}
       class:split-pane-active={mode === 'split' && splitActivePane === 'source'}
       aria-label={t.markdownSource()}
-      on:contextmenu|preventDefault
+      on:contextmenu|preventDefault={handleSourceContextMenu}
       on:pointerdown={() => mode === 'split' && setSplitActivePane('source')}
       on:focusin={() => mode === 'split' && setSplitActivePane('source')}
     >

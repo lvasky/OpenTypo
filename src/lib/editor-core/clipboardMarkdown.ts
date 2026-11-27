@@ -5,6 +5,7 @@ import { schema } from './schema';
 import { projectInlineSource, escapeInlineSourceLiteral, escapeLiteralBlockSyntax } from './InlineSourceCodec';
 
 export const plainTextPasteMeta = 'nomoPlainTextPaste';
+export const verbatimTextPasteMeta = 'nomoVerbatimTextPaste';
 
 export type ClipboardMarkdownClassification =
   | { kind: 'plain'; doc: ProseMirrorNode }
@@ -33,6 +34,7 @@ export function createPlainTextSlice(
   $context: ResolvedPos,
   inheritedMarks?: readonly Mark[],
   preserveVerbatim = false,
+  editingSource = false,
 ): Slice {
   const literal = normalizeClipboardText(text);
   const ancestors = Array.from({ length: $context.depth }, (_, i) => $context.node(i + 1));
@@ -40,7 +42,9 @@ export function createPlainTextSlice(
   const links = (inheritedMarks ?? $context.marks()).filter((mark) => mark.type.name === 'link');
   const escapedCellBoundary = /\\(?=[|\n])/.test(literal) && ancestors.some((node) => node.type === schema.nodes.table);
   const verbatim = preserveVerbatim && !links.length && !escapedCellBoundary;
-  const marks = richContext ? $context.marks() : [...links, schema.marks.inline_source.create({ literal: verbatim, verbatim })];
+  const marks = richContext ? $context.marks() : [
+    ...links, schema.marks.inline_source.create({ verbatim, literal: verbatim && editingSource }),
+  ];
   return Slice.maxOpen(Fragment.fromArray(createPlainTextBlocks(
     richContext || verbatim ? literal : escapePlainMarkdownText(literal, links.length > 0),
     marks,

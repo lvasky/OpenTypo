@@ -2,12 +2,12 @@ import type { Node as ProseMirrorNode } from 'prosemirror-model';
 import { isHistoryTransaction } from 'prosemirror-history';
 import { Plugin, PluginKey, TextSelection, type Transaction } from 'prosemirror-state';
 import { Mapping } from 'prosemirror-transform';
-import { isPlainTextPaste } from '../clipboardMarkdown';
+import { isPlainTextPaste, verbatimTextPasteMeta } from '../clipboardMarkdown';
 import { analyzeInlineSource, isInlineSourceBlock } from '../InlineSourceCodec';
 import { getInlineMarkdownSource, retainInlineMarkdownSpelling } from '../inlineMarkdownSpelling';
 import { getInlineMarkdownRanges, serializeMarkdown, tryParseMarkdown } from '../markdown';
 import { isInlineSourceComposing } from './inlineSourceEditing';
-import { requestMarkdownSourceEditor } from './markdownSourceEditor';
+import { beginMarkdownSourceEdit, getMarkdownSourceEdit, isMarkdownSourceProjection, requestMarkdownSourceEditor } from './markdownSourceEditor';
 
 interface TextRange {
   from: number;
@@ -140,9 +140,11 @@ export function markdownInlineInputPlugin(isEditable: () => boolean): Plugin<Tex
     appendTransaction(transactions, oldState, state) {
       if (!isEditable() || isInlineSourceComposing(state) ||
           isPlainTextPaste(transactions) || transactions.some(isHistoryTransaction) ||
+          transactions.every(isMarkdownSourceProjection) ||
           transactions.some((transaction) => transaction.getMeta(promotionMeta))) return null;
 
       const changes = changedTextRanges(transactions);
+      const pasted = transactions.some((tr) => tr.getMeta(verbatimTextPasteMeta));
       const composed = promotionKey.getState(oldState);
       if (composed) {
         const mapping = new Mapping();
@@ -160,11 +162,21 @@ export function markdownInlineInputPlugin(isEditable: () => boolean): Plugin<Tex
       }
 
       const tr = state.tr;
+      const sourceEdit = getMarkdownSourceEdit(state);
       let active: { pos: number; after: number; offset: number } | undefined;
+      let pastedSource: (TextRange & { after: number }) | undefined;
       for (const pos of [...blocks].sort((a, b) => b - a)) {
         const block = tr.doc.nodeAt(pos);
         if (!block) continue;
         let source = inlineText(block);
+        const from = pos + 1;
+        const to = from + block.content.size;
+        if (pasted && !sourceEdit && block.type.name === 'paragraph' && /^ {0,3}\[\^[^\]\s]+\]:/.test(source) &&
+            tr.selection.empty && tr.selection.from >= from && tr.selection.from <= to &&
+            !source.includes('\n') && canPromoteText(tr.doc, from, to)) {
+          pastedSource = { from, to, after: tr.mapping.maps.length };
+          continue;
+        }
         if (promoteFootnoteDefinition(tr, block, source, pos, changes)) source = inlineText(tr.doc.nodeAt(pos)!);
         if (source.includes('`') && restoreSourceInsideCode(tr, tr.doc.nodeAt(pos)!, pos, changes)) {
           source = inlineText(tr.doc.nodeAt(pos)!);
@@ -177,7 +189,12 @@ export function markdownInlineInputPlugin(isEditable: () => boolean): Plugin<Tex
         for (const range of getInlineMarkdownRanges(source).reverse()) {
           const from = pos + 1 + range.from;
           const to = pos + 1 + range.to;
+          if (sourceEdit && from < tr.mapping.map(sourceEdit.to, 1) && to > tr.mapping.map(sourceEdit.from, -1)) continue;
           if (!touches(mappedChanges, from, to) || !canPromoteText(tr.doc, from, to)) continue;
+          if (pasted && tr.selection.empty && tr.selection.from >= from && tr.selection.from <= to) {
+            pastedSource = { from, to, after: tr.mapping.maps.length };
+            continue;
+          }
           const parsed = tryParseMarkdown(source.slice(range.from, range.to))?.firstChild;
           if (parsed?.type !== state.schema.nodes.paragraph || !parsed.content.size) continue;
           const parent = tr.doc.resolve(from);
@@ -194,12 +211,15 @@ export function markdownInlineInputPlugin(isEditable: () => boolean): Plugin<Tex
         }
       }
 
-      if (!tr.docChanged) return null;
-      if (active) {
+      if (pastedSource) {
+        const mapping = tr.mapping.slice(pastedSource.after);
+        beginMarkdownSourceEdit(tr, mapping.map(pastedSource.from, 1), mapping.map(pastedSource.to, -1));
+      } else if (active) {
         const pos = tr.mapping.slice(active.after).map(active.pos, -1);
         tr.setSelection(TextSelection.create(tr.doc, pos));
         requestMarkdownSourceEditor(tr, { pos, start: active.offset, end: active.offset });
       }
+      if (!tr.docChanged) return null;
       return tr.setMeta(promotionMeta, true);
     },
   });

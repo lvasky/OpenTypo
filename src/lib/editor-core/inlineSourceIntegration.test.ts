@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { EditorState, TextSelection } from 'prosemirror-state';
+import { AllSelection, EditorState, TextSelection } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { createEditorCore } from './createEditorCore';
 import { projectInlineSource } from './InlineSourceCodec';
@@ -101,14 +101,12 @@ describe('inline source editor integration', () => {
       view.focus();
       expect(view.someProp('handleClick', (handler) => handler(view, pos, new MouseEvent('click')))).toBe(true);
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const field = target.querySelector<HTMLElement>('.pm-markdown-source-widget > :first-child');
-      expect(document.activeElement).toBe(field);
-      expect(field?.closest('.ProseMirror')).toBe(view.dom);
-      expect(target.querySelector('.pm-markdown-source-hidden')).not.toBeNull();
-      if (field instanceof HTMLInputElement) field.value = replacement;
-      else field!.textContent = replacement;
-      field!.blur();
-      expect(target.querySelector('.pm-markdown-source-widget')).toBeNull();
+      const field = target.querySelector<HTMLElement>('.pm-markdown-source-text')!;
+      expect(document.activeElement).toBe(view.dom);
+      const from = view.posAtDOM(field, 0);
+      view.dispatch(view.state.tr.insertText(replacement, from, from + field.textContent!.length));
+      editor.commitPendingEdits(true);
+      expect(target.querySelector('.pm-markdown-source-text')).toBeNull();
       expect(target.querySelector(selector)).not.toBeNull();
       expect(editor.flushMarkdown()).toContain(replacement);
     } finally {
@@ -130,8 +128,8 @@ describe('inline source editor integration', () => {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const field = target.querySelector<HTMLElement>('.pm-markdown-source-text');
       expect(field?.textContent).toBe(source);
-      expect(field?.getAttribute('contenteditable')).toBe('plaintext-only');
-      field!.blur();
+      expect(document.activeElement).toBe(view.dom);
+      view.dom.blur();
       expect(editor.flushMarkdown()).toBe(source);
     } finally {
       destroy();
@@ -173,9 +171,9 @@ describe('inline source editor integration', () => {
       view.dispatch(tr.setSelection(TextSelection.create(tr.doc, from)));
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const field = target.querySelector<HTMLElement>('.pm-markdown-source-text')!;
-      expect(document.activeElement).toBe(field);
+      expect(document.activeElement).toBe(view.dom);
       expect(field.textContent).toBe(source.replace(' ', ''));
-      field.blur();
+      view.dom.blur();
       expect(target.querySelector(selector)).not.toBeNull();
       expect(editor.flushMarkdown()).toBe(source.replace(' ', ''));
     } finally {
@@ -216,17 +214,99 @@ describe('inline source editor integration', () => {
 
       if (updated) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        const field = target.querySelector<HTMLElement>('.pm-markdown-source-text');
-        expect(document.activeElement).toBe(field);
-        expect(field?.textContent).toBe(template);
+        expect(document.activeElement).toBe(view.dom);
+        expect(view.state.doc.textContent).toBe(template);
         expect(document.getSelection()?.toString()).toBe(id === 'image' ? 'image title' : 'link name');
-        field!.textContent = updated;
-        field!.blur();
+        view.dispatch(view.state.tr.insertText(updated, 1, 1 + template.length));
+        editor.commitPendingEdits(true);
         expect(editor.getMarkdown()).toBe(updated);
       } else {
         expect(view.state.selection.$from.parent.type.name).toBe('footnote_def');
       }
     } finally {
+      destroy();
+    }
+  });
+
+  it.each(['[aa](bb)', '![aa](bb)', '[^1]'])('renders verbatim-pasted %s when the caret leaves the source', (syntax) => {
+    const { editor, view, target, destroy } = setup('before after');
+    try {
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 8)));
+      editor.pasteClipboard({ text: syntax }, { mode: 'plain' });
+      expect(target.querySelector('.pm-markdown-source-text')?.textContent).toBe(syntax);
+      expect(editor.getMarkdown()).toBe('before ' + syntax + 'after');
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1)));
+      expect(target.querySelector('.pm-markdown-source-text')).toBeNull();
+      expect(target.querySelector('a[href="bb"], .image-node, .footnote-ref')).not.toBeNull();
+      expect(editor.getMarkdown()).toBe('before ' + syntax + 'after');
+    } finally {
+      destroy();
+    }
+  });
+
+  it('inserts a real paragraph break when Enter is pressed inside expanded link source', async () => {
+    const { editor, view, target, destroy } = setup('[aa](bb)');
+    try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      view.focus();
+      expect(view.someProp('handleClick', (handler) => handler(view, 1, new MouseEvent('click')))).toBe(true);
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 3)));
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      view.dom.dispatchEvent(enter);
+      expect(enter.defaultPrevented).toBe(true);
+      expect(view.state.doc.childCount).toBe(2);
+      editor.commitPendingEdits(true);
+      expect(target.querySelector('a[href="bb"]')).toBeNull();
+      expect(editor.getMarkdown()).toBe('[a\n\na](bb)');
+    } finally {
+      destroy();
+    }
+  });
+
+  it('selects the entire document from the body or its context menu command with a TOC present', async () => {
+    const { editor, view, destroy } = setup('[TOC]\n\n# Heading\n\nBefore\n\nAfter');
+    const button = document.body.appendChild(document.createElement('button'));
+    try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      view.focus();
+      const key = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true });
+      view.dom.dispatchEvent(key);
+      expect(key.defaultPrevented).toBe(true);
+      expect(view.state.selection).toBeInstanceOf(AllSelection);
+      view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
+      button.focus();
+      expect(editor.selectAll()).toBe(true);
+      expect(view.state.selection).toBeInstanceOf(AllSelection);
+      expect(document.activeElement).toBe(view.dom);
+      expect(document.getSelection()?.toString()).toContain('Before');
+      expect(document.getSelection()?.toString()).toContain('After');
+    } finally {
+      button.remove();
+      destroy();
+    }
+  });
+
+  it('does not mark the document dirty by opening source, and undoes an actual edit after it renders', async () => {
+    const { editor, view, target, destroy } = setup('Before [aa](bb) after');
+    const dirty: boolean[] = [];
+    const unsubscribe = editor.subscribe((event) => dirty.push(event.dirty));
+    try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      view.focus();
+      expect(view.someProp('handleClick', (handler) => handler(view, 8, new MouseEvent('click')))).toBe(true);
+      expect(dirty.at(-1)).toBe(false);
+      view.dispatch(view.state.tr.insertText('cc', 13, 15));
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1)));
+      expect(target.querySelector('a[href="cc"]')).not.toBeNull();
+      expect(editor.execute({ type: 'undo' })).toBe(true);
+      expect(editor.getMarkdown()).toBe('Before [aa](bb) after');
+      expect(dirty.at(-1)).toBe(false);
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1)));
+      expect(target.querySelector('a[href="bb"]')).not.toBeNull();
+      expect(editor.execute({ type: 'redo' })).toBe(true);
+      expect(editor.getMarkdown()).toBe('Before [aa](cc) after');
+    } finally {
+      unsubscribe();
       destroy();
     }
   });

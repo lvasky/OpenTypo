@@ -81,7 +81,7 @@ import { displayMathInputPlugin } from './plugins/displayMathInput';
 import { mathInlineInputPlugin } from './plugins/mathInlineInput';
 import { markdownInlineInputPlugin } from './plugins/markdownInlineInput';
 import { mathInlineDraftPlugin, mathInlineDraftKey, canInsertMathInline, cancelMathInlineDraft } from './plugins/mathInlineDraft';
-import { markdownSourceEditorPlugin, openMarkdownSourceAt } from './plugins/markdownSourceEditor';
+import { commitMarkdownSourceEdit, isEditingMarkdownSource, isMarkdownSourceProjection, markdownSourceEditorPlugin, openMarkdownSourceAt } from './plugins/markdownSourceEditor';
 import { linkInteractionPlugin } from './plugins/linkInteraction';
 import {
   inlineSourceEditingPlugin,
@@ -142,6 +142,7 @@ import {
   createMarkdownClipboardSlice,
   createPlainTextSlice,
   plainTextPasteMeta,
+  verbatimTextPasteMeta,
   type ClipboardMarkdownClassification,
 } from './clipboardMarkdown';
 import { schema } from './schema';
@@ -317,6 +318,15 @@ export class ProseMirrorEditorCore implements EditorCore {
         return new Slice(adjustListStart(copied.content, 1), copied.openStart, copied.openEnd);
       },
       handlePaste: (_view, event, slice) => this.handleNativePaste(event, slice),
+      handleTextInput: (view, from, _to, text, defaultTransaction) => {
+        if (!isEditingMarkdownSource(view.state) || view.composing) return false;
+        const mark = schema.marks.inline_source;
+        const tr = defaultTransaction();
+        const end = from + text.length;
+        view.dispatch(tr.removeMark(from, end, mark)
+          .addMark(from, end, mark.create({ literal: true, verbatim: true })));
+        return true;
+      },
       handleDOMEvents: {
         keydown: (_view, event) => {
           if (
@@ -329,7 +339,8 @@ export class ProseMirrorEditorCore implements EditorCore {
           return false;
         },
         paste: (_view, event) => {
-          if (!event.clipboardData || !this.consumePlainTextPasteRequest()) return false;
+          if (!event.clipboardData) return false;
+          if (!this.consumePlainTextPasteRequest() && !this.isEditingMarkdownSource()) return false;
           const text = event.clipboardData.getData('text/plain');
           if (text && this.isEditable()) this.insertPlainClipboardText(text, true);
           event.preventDefault();
@@ -367,6 +378,7 @@ export class ProseMirrorEditorCore implements EditorCore {
         toc_block: (node, view, getPos) => new TocBlockNodeView(node, view, getPos as () => number),
       },
     });
+    this.view.dom.addEventListener('keydown', this.handleSelectAllKey, true);
     this.suspendedState = null;
     this.semanticViewDirty = false;
     this.refreshInitialEditableState();
@@ -380,6 +392,7 @@ export class ProseMirrorEditorCore implements EditorCore {
   commitPendingEdits(manualSave = false): void {
     this.assertActive();
     if (this.view && !isActiveEditComposing(this.view)) {
+      if (manualSave) commitMarkdownSourceEdit(this.view);
       commitActiveEdit(this.view, false, manualSave);
       if (this.isEditable()) clearEmptyInlineTemplates(this.view);
     }
@@ -426,12 +439,16 @@ export class ProseMirrorEditorCore implements EditorCore {
 
   unmount(): void {
     this.assertActive();
-    if (this.view) cancelMathInlineDraft(this.view);
+    if (this.view) {
+      cancelMathInlineDraft(this.view);
+      commitMarkdownSourceEdit(this.view);
+    }
     this.commitPendingEdits();
     this.clearPlainTextPasteRequest();
     if (!this.view) return;
     this.clearBlockAlignmentGaps();
     this.suspendedState = this.semanticViewDirty ? null : this.view.state;
+    this.view.dom.removeEventListener('keydown', this.handleSelectAllKey, true);
     this.view.destroy();
     for (const finish of [...this.compositionWaiters]) finish();
     this.view = null;
@@ -1014,6 +1031,10 @@ export class ProseMirrorEditorCore implements EditorCore {
     return this.pasteClipboard({ html }).status === 'inserted';
   }
 
+  isEditingMarkdownSource(): boolean {
+    return !!this.view && isEditingMarkdownSource(this.view.state);
+  }
+
   pasteClipboard(
     input: EditorPasteInput,
     options: { mode?: EditorPasteMode } = {},
@@ -1025,7 +1046,7 @@ export class ProseMirrorEditorCore implements EditorCore {
     }
 
     const text = input.text ?? '';
-    if (options.mode === 'plain') {
+    if (options.mode === 'plain' || this.isEditingMarkdownSource()) {
       return text ? this.insertPlainClipboardText(text, true) : { status: 'rejected', reason: 'no-text' };
     }
     if (this.view.state.selection.$from.parent.type.spec.code || (text && replaceInlineSourceCodeText(this.view.state, text))) {
@@ -1237,10 +1258,10 @@ export class ProseMirrorEditorCore implements EditorCore {
     if ($from.parent.type.name === 'details_summary' && $from.sameParent($to)) {
       const normalized = text.replace(/[\r\n\t]+/g, ' ');
       const tr = replaceInlineSourceCodeText(state, normalized) ?? (preserveVerbatim
-        ? state.tr.replaceSelection(createPlainTextSlice(normalized, $from, undefined, true))
+        ? state.tr.replaceSelection(createPlainTextSlice(normalized, $from, undefined, true, this.isEditingMarkdownSource()))
           .removeStoredMark(schema.marks.inline_source)
         : state.tr.insertText(normalized));
-      this.view.dispatch(tr.setMeta(plainTextPasteMeta, true).scrollIntoView());
+      this.view.dispatch(tr.setMeta(preserveVerbatim ? verbatimTextPasteMeta : plainTextPasteMeta, true).scrollIntoView());
       return { status: 'inserted', format: 'plain' };
     }
     const selectedLinkMarks = !state.selection.empty && $from.sameParent($to)
@@ -1248,9 +1269,9 @@ export class ProseMirrorEditorCore implements EditorCore {
     const codeTransaction = state.selection.$from.parent.type.spec.code && state.selection.$from.sameParent(state.selection.$to)
       ? state.tr.insertText(text.replace(/\r\n?/g, '\n')) : replaceInlineSourceCodeText(state, text);
     const transaction = (codeTransaction ?? state.tr.replaceSelection(createPlainTextSlice(
-      text, state.selection.$from, selectedLinkMarks, preserveVerbatim,
+      text, $from, selectedLinkMarks, preserveVerbatim, this.isEditingMarkdownSource(),
     )))
-      .setMeta(plainTextPasteMeta, true)
+      .setMeta(preserveVerbatim ? verbatimTextPasteMeta : plainTextPasteMeta, true)
       .scrollIntoView();
     if (preserveVerbatim && !codeTransaction) transaction.removeStoredMark(schema.marks.inline_source);
     this.view.dispatch(transaction);
@@ -1353,9 +1374,22 @@ export class ProseMirrorEditorCore implements EditorCore {
 
   selectAll(): boolean {
     this.assertActive();
-    if (!this.view) return false;
-    return selectAllCommand(this.view.state, this.view.dispatch);
+    if (!this.view || isActiveEditComposing(this.view) || isInlineSourceComposing(this.view)) return false;
+    commitActiveEdit(this.view, true);
+    const selected = selectAllCommand(this.view.state, this.view.dispatch);
+    this.view.focus();
+    return selected;
   }
+
+  private handleSelectAllKey = (event: KeyboardEvent): void => {
+    if ((!event.ctrlKey && !event.metaKey) || event.shiftKey || event.altKey || event.isComposing ||
+        event.key.toLowerCase() !== 'a' || (event.target instanceof Element && event.target.closest('.toc-block'))) return;
+    // A code block can own keyboard handling through its nested editor.
+    if (this.selectAll()) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
 
   selectContextTarget(target: ContextMenuTarget): boolean {
     this.assertActive();
@@ -1614,7 +1648,10 @@ export class ProseMirrorEditorCore implements EditorCore {
     this.assertActive();
     if (this.view) dismissQuickInsert(this.view);
     if (options.mode && options.mode !== this.runtime.mode && options.readonly !== true) {
-      if (this.view) commitActiveEdit(this.view, true);
+      if (this.view) {
+        commitMarkdownSourceEdit(this.view);
+        commitActiveEdit(this.view, true);
+      }
       this.commitPendingEdits();
     }
     if (options.strictMarkdown !== undefined && options.strictMarkdown !== this.runtime.strictMarkdown) this.flushPendingMarkdownSync();
@@ -1828,6 +1865,7 @@ export class ProseMirrorEditorCore implements EditorCore {
             exitDetailsEmptyParagraph,
             // $$ 回车自动补全：段落内只有 $$ 时按回车，生成空 math_block 并自动进入编辑态
             (state, dispatch) => {
+              if (isEditingMarkdownSource(state)) return false;
               const { $from, empty } = state.selection;
               if (!empty || $from.parent.type.name !== 'paragraph') return false;
               if ($from.parent.textContent !== '$$') return false;
@@ -1873,7 +1911,8 @@ export class ProseMirrorEditorCore implements EditorCore {
             selectNodeBackward,
           ),
           Delete: chainCommands(deleteSelection, detailsDeleteBoundary, joinForward, selectNodeForward),
-          Space: convertMarkdownListShortcut,
+          Space: (state, dispatch, view) =>
+            !isEditingMarkdownSource(state) && convertMarkdownListShortcut(state, dispatch, view),
           Tab: chainCommands(
             convertMarkdownListShortcut,
             goToNextCell(1),
@@ -1958,7 +1997,7 @@ export class ProseMirrorEditorCore implements EditorCore {
     if (!currentState || (this.runtime.readonly && transaction.docChanged)) return;
     const previousDoc = currentState.doc;
     const previousSelection = currentState.selection;
-    const nextState = currentState.apply(transaction);
+    const { state: nextState, transactions } = currentState.applyTransaction(transaction);
     // 空模板清理和原文标记可能由 appendTransaction 完成，不能只看首个事务。
     const docChanged = !nextState.doc.eq(previousDoc);
     if (this.runtime.readonly && docChanged) return;
@@ -1985,20 +2024,26 @@ export class ProseMirrorEditorCore implements EditorCore {
       // 显式切换和搜索/历史引起的自动展开均改变双栏几何，不改变正文修订。
     }
 
+    const sourceChanged = docChanged && transactions.some((tr) => tr.docChanged && !isMarkdownSourceProjection(tr));
     if (docChanged) {
       if (this.view) FootnoteRefNodeView.refreshOpenPreviews(this.view);
-      this.contentRevision += 1;
       this.syncRenderRevision += 1;
       this.syncSnapshot = null;
+      if (this.pendingMarkdownDoc) this.pendingMarkdownDoc = nextState.doc;
+    }
+    if (sourceChanged) {
+      this.contentRevision += 1;
       this.pendingMarkdownDoc = nextState.doc;
       this.dirty = !nextState.doc.eq(this.originalDoc);
       this.scheduleMarkdownSync();
-      this.notifyDeletedImages(previousDoc, nextState.doc, transaction.getMeta(IMAGE_FILE_DELETE_META));
+      const deletesFiles = transaction.getMeta(IMAGE_FILE_DELETE_META) ??
+        (transactions.some((tr) => tr.getMeta(IMAGE_FILE_DELETE_META) === false) ? false : undefined);
+      this.notifyDeletedImages(previousDoc, nextState.doc, deletesFiles);
     }
 
     // 每次事务都递增版本并通知（pending mark 状态切换、选区变化等需要及时反映到 UI）
     if (!visibilityOnly) this.version += 1;
-    this.emit(visibilityOnly ? 'details-visibility' : docChanged ? 'content-pending' : 'transaction');
+    this.emit(visibilityOnly ? 'details-visibility' : sourceChanged ? 'content-pending' : 'transaction');
     if (!nextState.selection.eq(previousSelection)) {
       this.options.onSelectionSnapshotChange?.({
         selection: nextState.selection.empty ? null : {
